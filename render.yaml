@@ -1,1 +1,15 @@
-{"Version":1,"Hash":"zDYgO8vWzYqXwH1VhFHwACyk1ZUH7+IO8s0qLCtchks=","Source":"LotoMaxServer","BasePath":"/","Mode":"Root","ManifestType":"Build","ReferencedProjectsConfiguration":[],"DiscoveryPatterns":[],"Assets":[],"Endpoints":[]}
+services:
+  - type: web
+    runtime: docker
+    name: loto-max-equipe-b
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: loto-max-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: LOTOMAX_DATA_PATH
+        value: /var/data/loto-max-state.json
+      - key: LOTOMAX_ADMIN_PIN
+        sync: false

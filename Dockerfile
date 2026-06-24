@@ -1,1 +1,20 @@
-{"GlobalPropertiesHash":"4YlGH3ezVSKoV5gHGCBLq++6QQBvttfaDrsejAoqpIE=","FingerprintPatternsHash":"gq3WsqcKBUGTSNle7RKKyXRIwh7M8ccEqOqYvIzoM04=","PropertyOverridesHash":"8ZRc1sGeVrPBx4lD717BgRaQekyh78QKV9SKsdt638U=","InputHashes":["8WjPnKDFAqGiy6vRBweRCZjbkH9GjsLFqV75Gr/6FCs="],"CachedAssets":{},"CachedCopyCandidates":{}}
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY LotoMaxServer/LotoMaxServer.csproj LotoMaxServer/
+RUN dotnet restore LotoMaxServer/LotoMaxServer.csproj
+
+COPY LotoMaxServer/ LotoMaxServer/
+RUN dotnet publish LotoMaxServer/LotoMaxServer.csproj -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+
+COPY --from=build /app/publish .
+COPY loto-max ./loto-max
+
+ENV LOTOMAX_STATIC_ROOT=/app/loto-max
+ENV LOTOMAX_DATA_PATH=/var/data/loto-max-state.json
+EXPOSE 8080
+
+ENTRYPOINT ["sh", "-c", "dotnet LotoMaxServer.dll --urls http://0.0.0.0:${PORT:-8080}"]

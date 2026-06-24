@@ -17,7 +17,7 @@ var staticRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredStaticRoot
     ? Path.Combine(app.Environment.ContentRootPath, "..", "loto-max")
     : configuredStaticRoot);
 
-app.MapGet("/", () => Results.Redirect("/loto-max/"));
+app.MapGet("/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok", checkedAt = DateTimeOffset.Now }));
 app.MapGet("/loto-max/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
 app.UseStaticFiles(new StaticFileOptions
