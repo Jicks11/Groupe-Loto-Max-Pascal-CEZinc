@@ -1,0 +1,15 @@
+services:
+  - type: web
+    runtime: docker
+    name: loto-max-equipe-b
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: loto-max-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: LOTOMAX_DATA_PATH
+        value: /var/data/loto-max-state.json
+      - key: LOTOMAX_ADMIN_PIN
+        sync: false

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#073326" />
+    <title>Equipe B Loto Max</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="logo-mark" aria-hidden="true">
+            <span>6</span>
+            <span>14</span>
+            <span>B</span>
+            <span>31</span>
+          </div>
+          <div>
+            <p class="eyebrow">Groupe prive</p>
+            <h1>Equipe B Loto Max</h1>
+            <p class="tagline">Soldes transparents, tirages automatises, historique visible.</p>
+          </div>
+        </div>
+
+        <div class="status-strip" aria-label="Etat du groupe">
+          <span>Lecture pour tous</span>
+          <span>Admin protege</span>
+          <span id="lastUpdated">Maj aujourd'hui</span>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="hero-panel" aria-labelledby="groupTitle">
+          <div class="hero-copy">
+            <p class="eyebrow">Tableau du groupe</p>
+            <h2 id="groupTitle">Tout le monde voit les memes chiffres.</h2>
+            <p>
+              Les participants consultent les soldes du groupe en tout temps. Toi, tu ajoutes
+              les depots et les gains; le systeme applique les tirages tout seul.
+            </p>
+          </div>
+
+          <div class="hero-card">
+            <div>
+              <span>Prochain paiement</span>
+              <strong id="nextDrawStatus">Calcule automatiquement</strong>
+            </div>
+            <div class="draw-meter" aria-hidden="true">
+              <span id="drawMeterFill"></span>
+            </div>
+            <p id="drawMeterText">Chargement...</p>
+          </div>
+        </section>
+
+        <section class="metrics-grid" aria-label="Resume financier">
+          <article>
+            <span>Nos gains</span>
+            <strong id="groupWins">$0</strong>
+            <small id="winsCoverage">0 tirage couvert</small>
+          </article>
+          <article>
+            <span>Soldes participants</span>
+            <strong id="participantTotal">$0</strong>
+            <small>Somme des comptes individuels</small>
+          </article>
+          <article>
+            <span>Avoir total groupe</span>
+            <strong id="groupTotal">$0</strong>
+            <small>Participants + nos gains</small>
+          </article>
+          <article>
+            <span>Cout par tirage</span>
+            <strong id="drawTotal">$0</strong>
+            <small id="drawFormula">13 x 6$</small>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel participant-panel" aria-labelledby="participantsTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Vue publique</p>
+                <h2 id="participantsTitle">Participants</h2>
+              </div>
+              <span class="pill" id="activeCount">13 actifs</span>
+            </div>
+            <div class="participant-list" id="participantList"></div>
+          </article>
+
+          <article class="panel detail-panel" aria-labelledby="detailTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Detail au clic</p>
+                <h2 id="detailTitle">Participant</h2>
+              </div>
+              <span class="pill" id="detailStatus">Solde</span>
+            </div>
+            <div id="memberDetail" class="member-detail"></div>
+          </article>
+        </section>
+
+        <section class="content-grid lower-grid">
+          <article class="panel admin-panel" aria-labelledby="adminTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Admin Pascal</p>
+                <h2 id="adminTitle">Saisie rapide</h2>
+              </div>
+              <button class="ghost-button" id="adminToggle" type="button">Mode admin</button>
+            </div>
+
+            <div class="admin-locked" id="adminLocked">
+              <strong>Lecture seule pour les participants</strong>
+              <p>Les soldes et historiques restent visibles. Les depots, gains et corrections demandent le PIN admin.</p>
+            </div>
+
+            <div class="admin-content hidden" id="adminContent">
+              <form class="admin-form" id="transactionForm">
+                <label>
+                  Action
+                  <select id="transactionType">
+                    <option value="deposit">Depot participant</option>
+                    <option value="gain">Gain du groupe</option>
+                    <option value="correction">Correction participant</option>
+                  </select>
+                </label>
+
+                <label id="participantField">
+                  Participant
+                  <select id="participantSelect"></select>
+                </label>
+
+                <div class="form-row">
+                  <label>
+                    Montant
+                    <input id="amountInput" type="number" step="0.01" value="69" required />
+                  </label>
+                  <label>
+                    Date
+                    <input id="dateInput" type="date" required />
+                  </label>
+                </div>
+
+                <label>
+                  Mode de paiement
+                  <select id="paymentMode">
+                    <option value="Interac">Interac</option>
+                    <option value="Comptant">Comptant</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Credit manuel">Credit manuel</option>
+                    <option value="Billet gratuit">Billet gratuit</option>
+                    <option value="Correction">Correction</option>
+                  </select>
+                </label>
+
+                <label>
+                  Note
+                  <input id="noteInput" type="text" maxlength="80" placeholder="Optionnel" />
+                </label>
+
+                <div class="button-row">
+                  <button class="primary-button" type="submit">Enregistrer</button>
+                  <button class="accent-button" id="applyDraw" type="button">Appliquer tirage</button>
+                </div>
+              </form>
+
+              <button class="ghost-button full-button" id="resetDemo" type="button">Rafraichir</button>
+            </div>
+
+            <p class="admin-note" id="adminNote">
+              Exemple: Roger envoie 69$ par Interac, tu choisis son nom et tu enregistres.
+            </p>
+          </article>
+
+          <article class="panel history-panel" aria-labelledby="historyTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Audit public</p>
+                <h2 id="historyTitle">Historique du groupe</h2>
+              </div>
+              <span class="pill">Live</span>
+            </div>
+            <div class="history-list" id="groupHistory"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
