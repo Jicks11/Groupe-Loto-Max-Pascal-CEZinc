@@ -13,7 +13,7 @@ Fonctions deja branchees:
 - Saisie admin pour depot, gain de groupe et correction.
 - Historique global.
 - Donnees sauvegardees dans `data/loto-max-state.json`.
-- Deduction automatique prevue les jeudis et dimanches, soit le lendemain des tirages mercredi/samedi.
+- Deduction automatique prevue les mardis et vendredis a minuit.
 - Si `Nos gains` couvre le tirage, le systeme paie avec les gains au lieu de retirer 6$ a chaque participant.
 
 PIN admin temporaire:

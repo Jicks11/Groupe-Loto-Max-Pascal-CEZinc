@@ -305,7 +305,13 @@ public sealed class LotoStore(IHostEnvironment environment)
         }
 
         var json = File.ReadAllText(_dataPath);
-        return JsonSerializer.Deserialize<LotoState>(json, _jsonOptions) ?? SeedState();
+        var state = JsonSerializer.Deserialize<LotoState>(json, _jsonOptions) ?? SeedState();
+        if (NormalizeState(state))
+        {
+            Save(state);
+        }
+
+        return state;
     }
 
     private void Save(LotoState state)
@@ -313,6 +319,25 @@ public sealed class LotoStore(IHostEnvironment environment)
         Directory.CreateDirectory(Path.GetDirectoryName(_dataPath)!);
         var json = JsonSerializer.Serialize(state, _jsonOptions);
         File.WriteAllText(_dataPath, json);
+    }
+
+    private static bool NormalizeState(LotoState state)
+    {
+        var days = state.Settings.DeductionDays;
+        var hasOldSchedule =
+            days.Count == 2 &&
+            days.Any(day => string.Equals(day, "Thursday", StringComparison.OrdinalIgnoreCase)) &&
+            days.Any(day => string.Equals(day, "Sunday", StringComparison.OrdinalIgnoreCase));
+
+        if (!hasOldSchedule)
+        {
+            return false;
+        }
+
+        days.Clear();
+        days.Add("Tuesday");
+        days.Add("Friday");
+        return true;
     }
 
     private LotoView BuildView(LotoState state)
@@ -515,8 +540,8 @@ public sealed class LotoStore(IHostEnvironment environment)
             now));
 
         return new LotoState(
-            "Equipe B Loto Max",
-            new LotoSettings(6, new List<string> { "Thursday", "Sunday" }, today, true, "2468"),
+            "Équipe B Moulage — Loto-Max CEZinc",
+            new LotoSettings(6, new List<string> { "Tuesday", "Friday" }, today, true, "2468"),
             participants,
             transactions,
             new List<AppliedDraw>(),
