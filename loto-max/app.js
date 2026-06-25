@@ -24,12 +24,16 @@ const els = {
   transactionType: document.querySelector("#transactionType"),
   participantField: document.querySelector("#participantField"),
   participantSelect: document.querySelector("#participantSelect"),
+  manageParticipantSelect: document.querySelector("#manageParticipantSelect"),
+  amountLabel: document.querySelector("#amountLabel"),
   amountInput: document.querySelector("#amountInput"),
   dateInput: document.querySelector("#dateInput"),
   paymentMode: document.querySelector("#paymentMode"),
   noteInput: document.querySelector("#noteInput"),
   applyDraw: document.querySelector("#applyDraw"),
   clearHistory: document.querySelector("#clearHistory"),
+  toggleParticipantActive: document.querySelector("#toggleParticipantActive"),
+  deleteParticipant: document.querySelector("#deleteParticipant"),
   newParticipantName: document.querySelector("#newParticipantName"),
   newParticipantBalance: document.querySelector("#newParticipantBalance"),
   newParticipantPaymentMode: document.querySelector("#newParticipantPaymentMode"),
@@ -184,15 +188,28 @@ function render() {
 
 function renderSelectors() {
   const currentValue = els.participantSelect.value || selectedId;
+  const currentManageValue = els.manageParticipantSelect.value || selectedId;
   els.participantSelect.innerHTML = state.participants
     .map((participant) => `<option value="${escapeHtml(participant.id)}">${escapeHtml(participant.name)}</option>`)
     .join("");
+  els.manageParticipantSelect.innerHTML = els.participantSelect.innerHTML;
   els.participantSelect.value = currentValue;
+  els.manageParticipantSelect.value = currentManageValue;
 
   const isGroupGain = els.transactionType.value === "gain";
   els.participantField.style.display = isGroupGain ? "none" : "grid";
+  els.amountLabel.textContent =
+    els.transactionType.value === "set_balance"
+      ? "Nouveau solde exact"
+      : els.transactionType.value === "withdrawal"
+        ? "Montant à enlever"
+        : "Montant";
   if (isGroupGain) {
     els.paymentMode.value = "Billet gratuit";
+  } else if (els.transactionType.value === "set_balance") {
+    els.paymentMode.value = "Correction";
+  } else if (els.transactionType.value === "withdrawal") {
+    els.paymentMode.value = "Trop-perçu";
   }
 }
 
@@ -224,7 +241,7 @@ function renderParticipants() {
     .map((participant) => {
       const className = participant.balance < 0 ? "negative" : "positive";
       const active = participant.id === selectedId ? " active" : "";
-      const meta = participant.balance < 0 ? "A rattraper" : "Solde disponible";
+      const meta = !participant.active ? "Inactif" : participant.balance < 0 ? "A rattraper" : "Solde disponible";
       return `
         <button class="participant-row${active}" type="button" data-participant="${escapeHtml(participant.id)}">
           <span>
@@ -250,7 +267,7 @@ function renderMemberDetail() {
   const participant = getSelectedParticipant();
   if (!participant) return;
 
-  const status = participant.balance < 0 ? "Negatif" : "Actif";
+  const status = !participant.active ? "Inactif" : participant.balance < 0 ? "Negatif" : "Actif";
 
   els.detailTitle.textContent = participant.name;
   els.detailStatus.textContent = status;
@@ -414,6 +431,72 @@ async function clearHistory() {
   }
 }
 
+async function setParticipantActive() {
+  try {
+    const participant = state.participants.find((item) => item.id === els.manageParticipantSelect.value);
+    if (!participant) return;
+
+    const nextActive = !participant.active;
+    const confirmed = window.confirm(
+      `${nextActive ? "Activer" : "Desactiver"} ${participant.name}?\n\n` +
+        (nextActive
+          ? "Il comptera dans les prochains tirages."
+          : "Il restera visible, mais ne comptera plus dans les prochains tirages.")
+    );
+    if (!confirmed) return;
+
+    state = await api("/api/participants/status", {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: participant.id,
+        active: nextActive,
+        adminPin: getAdminPin()
+      })
+    });
+    render();
+    showToast(nextActive ? "Participant active." : "Participant desactive.");
+  } catch (error) {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message);
+  }
+}
+
+async function deleteParticipant() {
+  try {
+    const participant = state.participants.find((item) => item.id === els.manageParticipantSelect.value);
+    if (!participant) return;
+
+    const confirmed = window.confirm(
+      `Supprimer ${participant.name}?\n\n` +
+        "Securite: le serveur refusera si son solde n'est pas a 0$ ou s'il a deja un historique."
+    );
+    if (!confirmed) return;
+
+    state = await api("/api/participants/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        participantId: participant.id,
+        adminPin: getAdminPin()
+      })
+    });
+    selectedId = state.participants[0]?.id || null;
+    if (selectedId) {
+      localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
+    } else {
+      localStorage.removeItem(SELECTED_MEMBER_KEY);
+    }
+    render();
+    showToast("Participant supprime.");
+  } catch (error) {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message);
+  }
+}
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
@@ -433,6 +516,8 @@ els.form.addEventListener("submit", addTransaction);
 els.participantForm.addEventListener("submit", addParticipant);
 els.applyDraw.addEventListener("click", applyDraw);
 els.clearHistory.addEventListener("click", clearHistory);
+els.toggleParticipantActive.addEventListener("click", setParticipantActive);
+els.deleteParticipant.addEventListener("click", deleteParticipant);
 els.adminToggle.addEventListener("click", unlockAdmin);
 els.transactionType.addEventListener("change", renderSelectors);
 els.resetDemo.addEventListener("click", () => loadState());
