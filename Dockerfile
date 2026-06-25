@@ -15,6 +15,7 @@ COPY loto-max ./loto-max
 
 ENV LOTOMAX_STATIC_ROOT=/app/loto-max
 ENV LOTOMAX_DATA_PATH=/var/data/loto-max-state.json
+ENV TZ=America/Toronto
 EXPOSE 8080
 
 ENTRYPOINT ["sh", "-c", "dotnet LotoMaxServer.dll --urls http://0.0.0.0:${PORT:-8080}"]

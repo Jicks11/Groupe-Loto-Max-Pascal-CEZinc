@@ -18,7 +18,7 @@ var staticRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredStaticRoot
     : configuredStaticRoot);
 
 app.MapGet("/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok", checkedAt = DateTimeOffset.Now }));
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok", checkedAt = LotoClock.Now, timeZone = LotoClock.TimeZoneId }));
 app.MapGet("/loto-max/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -117,7 +117,7 @@ public sealed class LotoStore(IHostEnvironment environment)
         lock (_gate)
         {
             var state = Load();
-            var changed = ProcessDueDraws(state, DateOnly.FromDateTime(DateTime.Now));
+            var changed = ProcessDueDraws(state, LotoClock.Today);
             if (changed)
             {
                 Save(state);
@@ -134,7 +134,7 @@ public sealed class LotoStore(IHostEnvironment environment)
             var state = Load();
             ValidateAdmin(state, request.AdminPin);
 
-            var date = request.Date ?? DateOnly.FromDateTime(DateTime.Now);
+            var date = request.Date ?? LotoClock.Today;
             var amount = request.Amount;
             if (amount == 0)
             {
@@ -171,7 +171,7 @@ public sealed class LotoStore(IHostEnvironment environment)
                     request.Note));
             }
 
-            state = state with { LastUpdatedAt = DateTimeOffset.Now };
+            state = state with { LastUpdatedAt = LotoClock.Now };
             Save(state);
             return BuildView(state);
         }
@@ -183,9 +183,9 @@ public sealed class LotoStore(IHostEnvironment environment)
         {
             var state = Load();
             ValidateAdmin(state, request.AdminPin);
-            var date = request.Date ?? NextDueDate(state, DateOnly.FromDateTime(DateTime.Now));
+            var date = request.Date ?? NextDueDate(state, LotoClock.Today);
             ApplyDraw(state, date, "manuel");
-            state = state with { LastUpdatedAt = DateTimeOffset.Now };
+            state = state with { LastUpdatedAt = LotoClock.Now };
             Save(state);
             return BuildView(state);
         }
@@ -216,10 +216,10 @@ public sealed class LotoStore(IHostEnvironment environment)
         lock (_gate)
         {
             var state = Load();
-            var changed = ProcessDueDraws(state, DateOnly.FromDateTime(DateTime.Now));
+            var changed = ProcessDueDraws(state, LotoClock.Today);
             if (changed)
             {
-                state = state with { LastUpdatedAt = DateTimeOffset.Now };
+                state = state with { LastUpdatedAt = LotoClock.Now };
                 Save(state);
             }
         }
@@ -275,7 +275,7 @@ public sealed class LotoStore(IHostEnvironment environment)
                 "nos gains",
                 $"{activeParticipants.Count} participants proteges"));
 
-            state.AppliedDraws.Insert(0, new AppliedDraw(date, "gains", drawTotal, DateTimeOffset.Now, createdBy));
+            state.AppliedDraws.Insert(0, new AppliedDraw(date, "gains", drawTotal, LotoClock.Now, createdBy));
             return;
         }
 
@@ -291,7 +291,7 @@ public sealed class LotoStore(IHostEnvironment environment)
                 "Deduction automatique"));
         }
 
-        state.AppliedDraws.Insert(0, new AppliedDraw(date, "participants", drawTotal, DateTimeOffset.Now, createdBy));
+        state.AppliedDraws.Insert(0, new AppliedDraw(date, "participants", drawTotal, LotoClock.Now, createdBy));
     }
 
     private LotoState Load()
@@ -358,7 +358,7 @@ public sealed class LotoStore(IHostEnvironment environment)
         var participantTotal = participants.Sum(participant => participant.Balance);
         var paidDraws = drawTotal > 0 ? (int)Math.Floor(groupWins / drawTotal) : 0;
         var winsRemainder = drawTotal > 0 ? groupWins % drawTotal : 0;
-        var nextDate = NextDueDate(state, DateOnly.FromDateTime(DateTime.Now));
+        var nextDate = NextDueDate(state, LotoClock.Today);
         var missing = Math.Max(0, drawTotal - groupWins);
         var nextDraw = new NextDrawView(nextDate, groupWins >= drawTotal, missing, winsRemainder);
 
@@ -466,7 +466,7 @@ public sealed class LotoStore(IHostEnvironment environment)
             title,
             string.IsNullOrWhiteSpace(paymentMode) ? "Manuel" : paymentMode.Trim(),
             string.IsNullOrWhiteSpace(note) ? "" : note.Trim(),
-            DateTimeOffset.Now);
+            LotoClock.Now);
 
     private void ValidateAdmin(LotoState state, string? adminPin)
     {
@@ -479,8 +479,8 @@ public sealed class LotoStore(IHostEnvironment environment)
 
     private static LotoState SeedState()
     {
-        var now = DateTimeOffset.Now;
-        var today = DateOnly.FromDateTime(DateTime.Now);
+        var now = LotoClock.Now;
+        var today = LotoClock.Today;
         var participants = new List<LotoParticipant>
         {
             new("pascal-taillefer", "Pascal Taillefer", true),
@@ -546,6 +546,36 @@ public sealed class LotoStore(IHostEnvironment environment)
             transactions,
             new List<AppliedDraw>(),
             now);
+    }
+}
+
+public static class LotoClock
+{
+    private static readonly TimeZoneInfo EasternTimeZone = ResolveEasternTimeZone();
+
+    public static DateTimeOffset Now => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, EasternTimeZone);
+
+    public static DateOnly Today => DateOnly.FromDateTime(Now.DateTime);
+
+    public static string TimeZoneId => EasternTimeZone.Id;
+
+    private static TimeZoneInfo ResolveEasternTimeZone()
+    {
+        foreach (var id in new[] { "America/Toronto", "Eastern Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Local;
     }
 }
 
