@@ -250,19 +250,10 @@ function renderMemberDetail() {
   if (!participant) return;
 
   const status = participant.balance < 0 ? "Negatif" : "Actif";
-  const className = participant.balance < 0 ? "negative" : "positive";
 
   els.detailTitle.textContent = participant.name;
   els.detailStatus.textContent = status;
   els.memberDetail.innerHTML = `
-    <div class="detail-top">
-      <div>
-        <h3>${escapeHtml(participant.name)}</h3>
-        <p>Information detaillee visible quand on clique sur son nom.</p>
-      </div>
-      <strong class="money ${className}">${money(participant.balance)}</strong>
-    </div>
-
     <div class="coverage-grid">
       <article>
         <span>Solde actuel</span>
