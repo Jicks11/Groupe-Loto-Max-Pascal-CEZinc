@@ -1504,6 +1504,8 @@ public sealed class LotoDatabase
         builder.MinPoolSize = 0;
         builder.MaxPoolSize = Math.Min(builder.MaxPoolSize, 5);
         builder.ConnectionIdleLifetime = Math.Min(builder.ConnectionIdleLifetime, 60);
+        builder.Timeout = Math.Min(builder.Timeout, 10);
+        builder.CommandTimeout = Math.Min(builder.CommandTimeout, 15);
         builder.KeepAlive = Math.Max(builder.KeepAlive, 30);
     }
 

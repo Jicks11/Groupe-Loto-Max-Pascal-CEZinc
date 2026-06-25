@@ -1,6 +1,7 @@
 const SELECTED_MEMBER_KEY = "equipe-b-loto-selected-member";
 const ADMIN_PIN_KEY = "equipe-b-loto-admin-pin";
 const REFRESH_INTERVAL_MS = 30000;
+const API_TIMEOUT_MS = 15000;
 
 const els = {
   lastUpdated: document.querySelector("#lastUpdated"),
@@ -49,6 +50,7 @@ const els = {
 let state = null;
 let selectedId = localStorage.getItem(SELECTED_MEMBER_KEY);
 let adminUnlocked = false;
+let stateLoading = false;
 
 function money(value) {
   return new Intl.NumberFormat("fr-CA", {
@@ -109,13 +111,30 @@ function escapeHtml(value) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    ...options
-  });
+  const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  let response;
+  try {
+    response = await fetch(path, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(fetchOptions.headers || {})
+      }
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Le serveur prend trop de temps a repondre. Attends quelques minutes et reessaie.");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload.error || "Erreur serveur.");
@@ -123,17 +142,40 @@ async function api(path, options = {}) {
   return payload;
 }
 
-async function loadState({ silent = false } = {}) {
+async function withButtonBusy(button, label, action) {
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = label;
   try {
-    state = await api("/api/state");
+    return await action();
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText;
+  }
+}
+
+async function loadState({ silent = false } = {}) {
+  if (stateLoading) {
+    return;
+  }
+
+  stateLoading = true;
+  if (!silent && !state) {
+    els.lastUpdated.textContent = "Chargement des donnees...";
+  }
+
+  try {
+    state = await api("/api/state", { timeoutMs: 20000 });
     if (!selectedId || !state.participants.some((participant) => participant.id === selectedId)) {
       selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
     }
     render();
   } catch (error) {
     if (!silent) {
-      showToast(`Impossible de charger les donnees: ${error.message}`);
+      showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
     }
+  } finally {
+    stateLoading = false;
   }
 }
 
@@ -151,19 +193,22 @@ function getAdminPin() {
 }
 
 async function unlockAdmin() {
-  try {
-    const pin = getAdminPin();
-    await api("/api/admin/check", {
-      method: "POST",
-      body: JSON.stringify({ adminPin: pin })
-    });
-    adminUnlocked = true;
-    renderAdminMode();
-    showToast("Mode admin active.");
-  } catch (error) {
-    sessionStorage.removeItem(ADMIN_PIN_KEY);
-    showToast(error.message);
-  }
+  return withButtonBusy(els.adminToggle, "Verification...", async () => {
+    try {
+      const pin = getAdminPin();
+      await api("/api/admin/check", {
+        method: "POST",
+        body: JSON.stringify({ adminPin: pin }),
+        timeoutMs: 12000
+      });
+      adminUnlocked = true;
+      renderAdminMode();
+      showToast("Mode admin active.");
+    } catch (error) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+      showToast(error.message, 6000);
+    }
+  });
 }
 
 function renderAdminMode() {
@@ -346,7 +391,7 @@ async function addTransaction(event) {
 }
 
 async function applyDraw() {
-  try {
+  return withButtonBusy(els.applyDraw, "Retrait...", async () => {
     const date = els.dateInput.value || state.nextDraw.date;
     const activeCount = state.participants.filter((participant) => participant.active).length;
     const confirmed = window.confirm(
@@ -358,16 +403,17 @@ async function applyDraw() {
 
     state = await api("/api/draws/participants", {
       method: "POST",
-      body: JSON.stringify({ date, adminPin: getAdminPin() })
+      body: JSON.stringify({ date, adminPin: getAdminPin() }),
+      timeoutMs: 15000
     });
     render();
     showToast("Retrait applique a tous les participants actifs.");
-  } catch (error) {
+  }).catch((error) => {
     if (String(error.message).includes("PIN")) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
     }
-    showToast(error.message);
-  }
+    showToast(error.message, 6000);
+  });
 }
 
 async function addParticipant(event) {
@@ -497,13 +543,13 @@ async function deleteParticipant() {
   }
 }
 
-function showToast(message) {
+function showToast(message, duration = 3000) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => {
     els.toast.classList.remove("show");
-  }, 3000);
+  }, duration);
 }
 
 function setToday() {
@@ -520,7 +566,7 @@ els.toggleParticipantActive.addEventListener("click", setParticipantActive);
 els.deleteParticipant.addEventListener("click", deleteParticipant);
 els.adminToggle.addEventListener("click", unlockAdmin);
 els.transactionType.addEventListener("change", renderSelectors);
-els.resetDemo.addEventListener("click", () => loadState());
+els.resetDemo.addEventListener("click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
 
 els.resetDemo.textContent = "Rafraichir";
 els.adminNote.textContent = "Les participants voient tout en lecture seule. Les actions admin demandent le PIN.";
