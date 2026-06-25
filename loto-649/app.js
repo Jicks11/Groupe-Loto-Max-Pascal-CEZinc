@@ -3,7 +3,7 @@ const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
 const REFRESH_INTERVAL_MS = 30000;
 const API_TIMEOUT_MS = 15000;
-const API_BASE = APP_SCOPE === "loto-649" ? "/api/loto-649" : "";
+const API_BASE = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
 
 const els = {
   lastUpdated: document.querySelector("#lastUpdated"),
@@ -116,10 +116,12 @@ async function api(path, options = {}) {
   const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const endpoint = path.startsWith("/api/") ? path.slice(4) : path;
+  const url = `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(url, {
       ...fetchOptions,
       signal: controller.signal,
       headers: {
