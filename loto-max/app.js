@@ -1,6 +1,6 @@
 const SELECTED_MEMBER_KEY = "equipe-b-loto-selected-member";
 const ADMIN_PIN_KEY = "equipe-b-loto-admin-pin";
-const REFRESH_INTERVAL_MS = 10000;
+const REFRESH_INTERVAL_MS = 30000;
 
 const els = {
   lastUpdated: document.querySelector("#lastUpdated"),

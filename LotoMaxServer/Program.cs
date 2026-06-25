@@ -1477,7 +1477,9 @@ public sealed class LotoDatabase
         if (!rawConnectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
             !rawConnectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
         {
-            return rawConnectionString;
+            var rawBuilder = new NpgsqlConnectionStringBuilder(rawConnectionString);
+            ApplyConnectionDefaults(rawBuilder);
+            return rawBuilder.ConnectionString;
         }
 
         var uri = new Uri(rawConnectionString);
@@ -1492,7 +1494,17 @@ public sealed class LotoDatabase
             SslMode = SslMode.Require
         };
 
+        ApplyConnectionDefaults(builder);
         return builder.ConnectionString;
+    }
+
+    private static void ApplyConnectionDefaults(NpgsqlConnectionStringBuilder builder)
+    {
+        builder.Pooling = true;
+        builder.MinPoolSize = 0;
+        builder.MaxPoolSize = Math.Min(builder.MaxPoolSize, 5);
+        builder.ConnectionIdleLifetime = Math.Min(builder.ConnectionIdleLifetime, 60);
+        builder.KeepAlive = Math.Max(builder.KeepAlive, 30);
     }
 
     private static DateTime ToDateTime(DateOnly date) => date.ToDateTime(TimeOnly.MinValue);
