@@ -1191,6 +1191,79 @@ public sealed class LotoDatabase
                 );
                 """);
 
+            ExecuteNonQuery(connection, null, """
+                ALTER TABLE loto_settings
+                    ADD COLUMN IF NOT EXISTS group_name text NOT NULL DEFAULT 'Equipe B Moulage - Loto-Max CEZinc',
+                    ADD COLUMN IF NOT EXISTS draw_cost_per_participant numeric(12,2) NOT NULL DEFAULT 6.00,
+                    ADD COLUMN IF NOT EXISTS deduction_days_json text NOT NULL DEFAULT '["Tuesday","Friday"]',
+                    ADD COLUMN IF NOT EXISTS automation_start_date date NOT NULL DEFAULT DATE '2026-06-24',
+                    ADD COLUMN IF NOT EXISTS automation_enabled boolean NOT NULL DEFAULT true,
+                    ADD COLUMN IF NOT EXISTS admin_pin text NOT NULL DEFAULT '2468',
+                    ADD COLUMN IF NOT EXISTS last_updated_at timestamptz NOT NULL DEFAULT now();
+
+                ALTER TABLE loto_participants
+                    ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT 'Participant',
+                    ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true,
+                    ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+                ALTER TABLE loto_transactions
+                    ADD COLUMN IF NOT EXISTS transaction_date date NOT NULL DEFAULT current_date,
+                    ADD COLUMN IF NOT EXISTS type text NOT NULL DEFAULT 'correction',
+                    ADD COLUMN IF NOT EXISTS participant_id text NULL,
+                    ADD COLUMN IF NOT EXISTS amount numeric(12,2) NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS title text NOT NULL DEFAULT 'Transaction',
+                    ADD COLUMN IF NOT EXISTS payment_mode text NOT NULL DEFAULT 'Admin',
+                    ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+                ALTER TABLE loto_applied_draws
+                    ADD COLUMN IF NOT EXISTS paid_by text NOT NULL DEFAULT 'participants',
+                    ADD COLUMN IF NOT EXISTS amount numeric(12,2) NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+                    ADD COLUMN IF NOT EXISTS created_by text NOT NULL DEFAULT 'system';
+
+                ALTER TABLE loto_state_snapshots
+                    ADD COLUMN IF NOT EXISTS id bigserial,
+                    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+                    ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT 'migration',
+                    ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+                UPDATE loto_settings
+                SET
+                    group_name = COALESCE(group_name, 'Equipe B Moulage - Loto-Max CEZinc'),
+                    draw_cost_per_participant = COALESCE(draw_cost_per_participant, 6.00),
+                    deduction_days_json = COALESCE(deduction_days_json, '["Tuesday","Friday"]'),
+                    automation_start_date = COALESCE(automation_start_date, DATE '2026-06-24'),
+                    automation_enabled = COALESCE(automation_enabled, true),
+                    admin_pin = COALESCE(admin_pin, '2468'),
+                    last_updated_at = COALESCE(last_updated_at, now());
+
+                UPDATE loto_participants
+                SET
+                    name = COALESCE(name, 'Participant'),
+                    active = COALESCE(active, true),
+                    sort_order = COALESCE(sort_order, 0),
+                    created_at = COALESCE(created_at, now());
+
+                UPDATE loto_transactions
+                SET
+                    transaction_date = COALESCE(transaction_date, current_date),
+                    type = COALESCE(type, 'correction'),
+                    amount = COALESCE(amount, 0),
+                    title = COALESCE(title, 'Transaction'),
+                    payment_mode = COALESCE(payment_mode, 'Admin'),
+                    note = COALESCE(note, ''),
+                    created_at = COALESCE(created_at, now());
+
+                UPDATE loto_applied_draws
+                SET
+                    paid_by = COALESCE(paid_by, 'participants'),
+                    amount = COALESCE(amount, 0),
+                    created_at = COALESCE(created_at, now()),
+                    created_by = COALESCE(created_by, 'system');
+                """);
+
             _schemaReady = true;
         }
     }
@@ -1220,13 +1293,13 @@ public sealed class LotoDatabase
 
             var deductionDays = JsonSerializer.Deserialize<List<string>>(reader.GetString(2)) ?? new List<string>();
             state = new LotoState(
-                reader.GetString(0),
+                ReadString(reader, 0, "Equipe B Moulage - Loto-Max CEZinc"),
                 new LotoSettings(
                     reader.GetDecimal(1),
                     deductionDays,
                     ToDateOnly(reader.GetDateTime(3)),
                     reader.GetBoolean(4),
-                    reader.GetString(5)),
+                    ReadString(reader, 5, "2468")),
                 new List<LotoParticipant>(),
                 new List<LotoTransaction>(),
                 new List<AppliedDraw>(),
@@ -1244,7 +1317,7 @@ public sealed class LotoDatabase
             {
                 state.Participants.Add(new LotoParticipant(
                     reader.GetString(0),
-                    reader.GetString(1),
+                    ReadString(reader, 1, "Participant"),
                     reader.GetBoolean(2)));
             }
         }
@@ -1270,12 +1343,12 @@ public sealed class LotoDatabase
                 state.Transactions.Add(new LotoTransaction(
                     reader.GetString(0),
                     ToDateOnly(reader.GetDateTime(1)),
-                    reader.GetString(2),
+                    ReadString(reader, 2, "correction"),
                     reader.IsDBNull(3) ? null : reader.GetString(3),
                     reader.GetDecimal(4),
-                    reader.GetString(5),
-                    reader.GetString(6),
-                    reader.GetString(7),
+                    ReadString(reader, 5, "Transaction"),
+                    ReadString(reader, 6, "Admin"),
+                    ReadString(reader, 7, ""),
                     ToDateTimeOffset(reader.GetValue(8))));
             }
         }
@@ -1291,10 +1364,10 @@ public sealed class LotoDatabase
             {
                 state.AppliedDraws.Add(new AppliedDraw(
                     ToDateOnly(reader.GetDateTime(0)),
-                    reader.GetString(1),
+                    ReadString(reader, 1, "participants"),
                     reader.GetDecimal(2),
                     ToDateTimeOffset(reader.GetValue(3)),
-                    reader.GetString(4)));
+                    ReadString(reader, 4, "system")));
             }
         }
 
@@ -1359,6 +1432,9 @@ public sealed class LotoDatabase
             DateTime date => new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Utc)),
             _ => DateTimeOffset.Parse(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "")
         };
+
+    private static string ReadString(NpgsqlDataReader reader, int ordinal, string fallback) =>
+        reader.IsDBNull(ordinal) ? fallback : reader.GetString(ordinal);
 }
 
 public static class LotoClock
