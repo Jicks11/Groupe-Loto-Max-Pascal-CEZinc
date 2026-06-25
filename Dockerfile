@@ -13,9 +13,12 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 COPY loto-max ./loto-max
+COPY loto-649 ./loto-649
 
 ENV LOTOMAX_STATIC_ROOT=/app/loto-max
+ENV LOTO649_STATIC_ROOT=/app/loto-649
 ENV LOTOMAX_DATA_PATH=/var/data/loto-max-state.json
+ENV LOTO649_DATA_PATH=/var/data/loto-649-state.json
 ENV TZ=America/Toronto
 EXPOSE 8080
 

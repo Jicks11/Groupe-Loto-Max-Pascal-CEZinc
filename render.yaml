@@ -11,6 +11,8 @@ services:
     envVars:
       - key: LOTOMAX_DATA_PATH
         value: /var/data/loto-max-state.json
+      - key: LOTO649_DATA_PATH
+        value: /var/data/loto-649-state.json
       - key: LOTOMAX_ADMIN_PIN
         sync: false
       - key: DATABASE_URL

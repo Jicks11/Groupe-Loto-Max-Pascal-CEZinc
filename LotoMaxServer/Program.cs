@@ -11,156 +11,189 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     options.SerializerOptions.WriteIndented = true;
 });
-builder.Services.AddSingleton<LotoStore>();
+builder.Services.AddSingleton<LotoGroupRegistry>();
 builder.Services.AddHostedService<DrawScheduler>();
 
 var app = builder.Build();
-var configuredStaticRoot = Environment.GetEnvironmentVariable("LOTOMAX_STATIC_ROOT");
-var staticRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredStaticRoot)
+var configuredLotoMaxRoot = Environment.GetEnvironmentVariable("LOTOMAX_STATIC_ROOT");
+var lotoMaxRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredLotoMaxRoot)
     ? Path.Combine(app.Environment.ContentRootPath, "..", "loto-max")
-    : configuredStaticRoot);
+    : configuredLotoMaxRoot);
+var configuredLoto649Root = Environment.GetEnvironmentVariable("LOTO649_STATIC_ROOT");
+var loto649Root = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredLoto649Root)
+    ? Path.Combine(app.Environment.ContentRootPath, "..", "loto-649")
+    : configuredLoto649Root);
 
-app.MapGet("/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
-app.MapGet("/api/health", (LotoStore store) => Results.Ok(new
+app.MapGet("/", () => Results.Content(File.ReadAllText(Path.Combine(lotoMaxRoot, "index.html")), "text/html; charset=utf-8"));
+app.MapGet("/api/health", (LotoGroupRegistry groups) => Results.Ok(new
 {
     status = "ok",
     checkedAt = LotoClock.Now,
     timeZone = LotoClock.TimeZoneId,
-    storage = store.StorageMode
+    groups = groups.Stores.Select(store => new { store.GroupId, storage = store.StorageMode })
 }));
-app.MapGet("/loto-max/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
+app.MapGet("/loto-max/", () => Results.Content(File.ReadAllText(Path.Combine(lotoMaxRoot, "index.html")), "text/html; charset=utf-8"));
+app.MapGet("/loto-649/", () => Results.Content(File.ReadAllText(Path.Combine(loto649Root, "index.html")), "text/html; charset=utf-8"));
 app.UseStaticFiles(new StaticFileOptions
 {
-    FileProvider = new PhysicalFileProvider(staticRoot),
+    FileProvider = new PhysicalFileProvider(lotoMaxRoot),
     RequestPath = "/loto-max"
 });
-
-app.MapGet("/api/state", (LotoStore store) => Results.Ok(store.GetView()));
-
-app.MapPost("/api/transactions", (TransactionRequest request, LotoStore store) =>
+app.UseStaticFiles(new StaticFileOptions
 {
-    try
-    {
-        return Results.Ok(store.AddTransaction(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-    catch (Exception exception)
-    {
-        return Results.BadRequest(new { error = $"Erreur technique pendant la transaction: {exception.Message}" });
-    }
+    FileProvider = new PhysicalFileProvider(loto649Root),
+    RequestPath = "/loto-649"
 });
 
-app.MapPost("/api/participants", (ParticipantRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.AddParticipant(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-    catch (Exception exception)
-    {
-        return Results.BadRequest(new { error = $"Erreur technique pendant l'ajout du participant: {exception.Message}" });
-    }
-});
-
-app.MapPost("/api/participants/status", (ParticipantStatusRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.SetParticipantActive(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-});
-
-app.MapPost("/api/participants/delete", (ParticipantDeleteRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.DeleteParticipant(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-});
-
-app.MapPost("/api/draws/apply", (DrawRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.ApplyManualDraw(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-});
-
-app.MapPost("/api/draws/participants", (DrawRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.ApplyParticipantDraw(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-    catch (Exception exception)
-    {
-        return Results.BadRequest(new { error = $"Erreur technique pendant le retrait: {exception.Message}" });
-    }
-});
-
-app.MapPost("/api/admin/reseed", (AdminRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.Reseed(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-});
-
-app.MapPost("/api/admin/clear-history", (AdminRequest request, LotoStore store) =>
-{
-    try
-    {
-        return Results.Ok(store.ClearHistory(request));
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-});
-
-app.MapPost("/api/admin/check", (AdminRequest request, LotoStore store) =>
-{
-    try
-    {
-        store.CheckAdmin(request);
-        return Results.Ok(new { ok = true });
-    }
-    catch (LotoException exception)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-});
+MapLotoApi(app.MapGroup("/api"), registry => registry.LotoMax);
+MapLotoApi(app.MapGroup("/api/loto-max"), registry => registry.LotoMax);
+MapLotoApi(app.MapGroup("/api/loto-649"), registry => registry.Loto649);
 
 app.Run();
 
-public sealed class DrawScheduler(LotoStore store, ILogger<DrawScheduler> logger) : BackgroundService
+static void MapLotoApi(RouteGroupBuilder api, Func<LotoGroupRegistry, LotoStore> getStore)
+{
+    api.MapGet("/state", (LotoGroupRegistry registry) => Results.Ok(getStore(registry).GetView()));
+
+    api.MapPost("/transactions", (TransactionRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).AddTransaction(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant la transaction: {exception.Message}" });
+        }
+    });
+
+    api.MapPost("/participants", (ParticipantRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).AddParticipant(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant l'ajout du participant: {exception.Message}" });
+        }
+    });
+
+    api.MapPost("/participants/status", (ParticipantStatusRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).SetParticipantActive(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    api.MapPost("/participants/delete", (ParticipantDeleteRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).DeleteParticipant(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    api.MapPost("/draws/apply", (DrawRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).ApplyManualDraw(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    api.MapPost("/draws/participants", (DrawRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).ApplyParticipantDraw(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant le retrait: {exception.Message}" });
+        }
+    });
+
+    api.MapPost("/admin/reseed", (AdminRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).Reseed(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    api.MapPost("/admin/clear-history", (AdminRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).ClearHistory(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+
+    api.MapPost("/admin/check", (AdminRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            getStore(registry).CheckAdmin(request);
+            return Results.Ok(new { ok = true });
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    });
+}
+
+public sealed class LotoGroupRegistry
+{
+    public LotoGroupRegistry(IHostEnvironment environment)
+    {
+        LotoMax = new LotoStore(environment, LotoGroupConfig.LotoMax());
+        Loto649 = new LotoStore(environment, LotoGroupConfig.Loto649());
+        Stores = new[] { LotoMax, Loto649 };
+    }
+
+    public LotoStore LotoMax { get; }
+
+    public LotoStore Loto649 { get; }
+
+    public IReadOnlyList<LotoStore> Stores { get; }
+}
+
+public sealed class DrawScheduler(LotoGroupRegistry groups, ILogger<DrawScheduler> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -178,27 +211,93 @@ public sealed class DrawScheduler(LotoStore store, ILogger<DrawScheduler> logger
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
         do
         {
-            try
+            foreach (var store in groups.Stores)
             {
-                store.ProcessDueDraws();
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Erreur pendant le traitement automatique des tirages.");
+                try
+                {
+                    store.ProcessDueDraws();
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(exception, "Erreur pendant le traitement automatique des tirages pour {GroupId}.", store.GroupId);
+                }
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }
 
-public sealed class LotoStore(IHostEnvironment environment)
+public sealed record LotoParticipantSeed(string Id, string Name, decimal OpeningBalance);
+
+public sealed record LotoGroupConfig(
+    string GroupId,
+    string TablePrefix,
+    string DataPathEnvVar,
+    string DefaultDataFileName,
+    string AdminPinEnvVar,
+    string DefaultGroupName,
+    decimal DrawCostPerParticipant,
+    List<string> DeductionDays,
+    decimal OpeningGroupWins,
+    string OpeningSource,
+    List<LotoParticipantSeed> Participants)
 {
+    public static LotoGroupConfig LotoMax() => new(
+        "loto-max",
+        "loto",
+        "LOTOMAX_DATA_PATH",
+        "loto-max-state.json",
+        "LOTOMAX_ADMIN_PIN",
+        "Équipe B Moulage — Loto-Max CEZinc",
+        6,
+        new List<string> { "Tuesday", "Friday" },
+        96,
+        "Excel",
+        new List<LotoParticipantSeed>
+        {
+            new("pascal-taillefer", "Pascal Taillefer", -6),
+            new("etienne-berthiaume", "Etienne Berthiaume", 24),
+            new("luc-arsenault", "Luc Arsenault", 55),
+            new("christian-larochelle", "Christian Larochelle", 34),
+            new("marc-leduc", "Marc Leduc", 34),
+            new("steve-bertrand", "Steve Bertrand", 14),
+            new("martine-hamel", "Martine Hamel", 5),
+            new("keith-saulnier", "Keith Saulnier", -12),
+            new("simon-prairie", "Simon Prairie", 4),
+            new("jean-francois-durocher", "Jean-Francois Durocher", 4),
+            new("alexandre-genest", "Alexandre Genest", 22),
+            new("mario-dufresne", "Mario Dufresne", 55),
+            new("roger-leclair", "Roger Leclair", 54)
+        });
+
+    public static LotoGroupConfig Loto649() => new(
+        "loto-649",
+        "loto649",
+        "LOTO649_DATA_PATH",
+        "loto-649-state.json",
+        "LOTO649_ADMIN_PIN",
+        "Famille Taillefer - 6/49",
+        6,
+        new List<string> { "Wednesday", "Saturday" },
+        17,
+        "Excel",
+        new List<LotoParticipantSeed>
+        {
+            new("pascal-taillefer", "Pascal Taillefer", -5),
+            new("serge-taillefer", "Serge Taillefer", 36),
+            new("gaetane-taillefer", "Ga\u00e9tane Taillefer", 36),
+            new("dominique-taillefer", "Dominique Taillefer", -12)
+        });
+}
+
+public sealed class LotoStore
+{
+    private readonly IHostEnvironment _environment;
+    private readonly LotoGroupConfig _config;
     private readonly object _gate = new();
-    private readonly string _dataPath = Path.GetFullPath(string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOTOMAX_DATA_PATH"))
-        ? Path.Combine(environment.ContentRootPath, "..", "data", "loto-max-state.json")
-        : Environment.GetEnvironmentVariable("LOTOMAX_DATA_PATH")!);
-    private readonly string? _adminPin = Environment.GetEnvironmentVariable("LOTOMAX_ADMIN_PIN");
-    private readonly LotoDatabase? _database = LotoDatabase.Create();
+    private readonly string _dataPath;
+    private readonly string? _adminPin;
+    private readonly LotoDatabase? _database;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -207,6 +306,20 @@ public sealed class LotoStore(IHostEnvironment environment)
     private LotoState? _cachedState;
     private DateTimeOffset _lastDatabaseRefresh = DateTimeOffset.MinValue;
     private static readonly TimeSpan DatabaseRefreshInterval = TimeSpan.FromMinutes(5);
+
+    public LotoStore(IHostEnvironment environment, LotoGroupConfig config)
+    {
+        _environment = environment;
+        _config = config;
+        _dataPath = Path.GetFullPath(string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(config.DataPathEnvVar))
+            ? Path.Combine(environment.ContentRootPath, "..", "data", config.DefaultDataFileName)
+            : Environment.GetEnvironmentVariable(config.DataPathEnvVar)!);
+        _adminPin = Environment.GetEnvironmentVariable(config.AdminPinEnvVar)
+            ?? Environment.GetEnvironmentVariable("LOTOMAX_ADMIN_PIN");
+        _database = LotoDatabase.Create(config.TablePrefix, config.DefaultGroupName, config.DeductionDays);
+    }
+
+    public string GroupId => _config.GroupId;
 
     public string StorageMode => _database is null ? "file" : "postgres";
 
@@ -762,22 +875,33 @@ public sealed class LotoStore(IHostEnvironment environment)
         CacheState(state, refreshedFromDatabase: false);
     }
 
-    private static bool NormalizeState(LotoState state)
+    private bool NormalizeState(LotoState state)
     {
         var days = state.Settings.DeductionDays;
+        var expectedDays = _config.DeductionDays;
+        var alreadyExpected =
+            days.Count == expectedDays.Count &&
+            expectedDays.All(expected => days.Any(day => string.Equals(day, expected, StringComparison.OrdinalIgnoreCase)));
+
+        if (alreadyExpected)
+        {
+            return false;
+        }
+
         var hasOldSchedule =
             days.Count == 2 &&
             days.Any(day => string.Equals(day, "Thursday", StringComparison.OrdinalIgnoreCase)) &&
             days.Any(day => string.Equals(day, "Sunday", StringComparison.OrdinalIgnoreCase));
 
-        if (!hasOldSchedule)
+        var shouldApplyConfiguredSchedule = hasOldSchedule || string.Equals(_config.GroupId, "loto-649", StringComparison.OrdinalIgnoreCase);
+
+        if (!shouldApplyConfiguredSchedule)
         {
             return false;
         }
 
         days.Clear();
-        days.Add("Tuesday");
-        days.Add("Friday");
+        days.AddRange(expectedDays);
         return true;
     }
 
@@ -1000,71 +1124,45 @@ public sealed class LotoStore(IHostEnvironment environment)
         }
     }
 
-    private static LotoState SeedState()
+    private LotoState SeedState()
     {
         var now = LotoClock.Now;
         var today = LotoClock.Today;
-        var participants = new List<LotoParticipant>
-        {
-            new("pascal-taillefer", "Pascal Taillefer", true),
-            new("etienne-berthiaume", "Etienne Berthiaume", true),
-            new("luc-arsenault", "Luc Arsenault", true),
-            new("christian-larochelle", "Christian Larochelle", true),
-            new("marc-leduc", "Marc Leduc", true),
-            new("steve-bertrand", "Steve Bertrand", true),
-            new("martine-hamel", "Martine Hamel", true),
-            new("keith-saulnier", "Keith Saulnier", true),
-            new("simon-prairie", "Simon Prairie", true),
-            new("jean-francois-durocher", "Jean-Francois Durocher", true),
-            new("alexandre-genest", "Alexandre Genest", true),
-            new("mario-dufresne", "Mario Dufresne", true),
-            new("roger-leclair", "Roger Leclair", true)
-        };
+        var participants = _config.Participants
+            .Select(participant => new LotoParticipant(participant.Id, participant.Name, true))
+            .ToList();
 
-        var openingBalances = new Dictionary<string, decimal>
-        {
-            ["pascal-taillefer"] = -6,
-            ["etienne-berthiaume"] = 24,
-            ["luc-arsenault"] = 55,
-            ["christian-larochelle"] = 34,
-            ["marc-leduc"] = 34,
-            ["steve-bertrand"] = 14,
-            ["martine-hamel"] = 5,
-            ["keith-saulnier"] = -12,
-            ["simon-prairie"] = 4,
-            ["jean-francois-durocher"] = 4,
-            ["alexandre-genest"] = 22,
-            ["mario-dufresne"] = 55,
-            ["roger-leclair"] = 54
-        };
-
-        var transactions = participants
+        var transactions = _config.Participants
+            .Where(participant => participant.OpeningBalance != 0)
             .Select(participant => new LotoTransaction(
                 Guid.NewGuid().ToString("N"),
                 today,
                 "opening",
                 participant.Id,
-                openingBalances[participant.Id],
+                participant.OpeningBalance,
                 "Solde importe",
-                "Excel",
+                _config.OpeningSource,
                 "Import initial du groupe",
                 now))
             .ToList();
 
-        transactions.Insert(0, new LotoTransaction(
-            Guid.NewGuid().ToString("N"),
-            today,
-            "gain",
-            null,
-            96,
-            "nos gains disponibles",
-            "Excel",
-            "Import initial du groupe",
-            now));
+        if (_config.OpeningGroupWins != 0)
+        {
+            transactions.Insert(0, new LotoTransaction(
+                Guid.NewGuid().ToString("N"),
+                today,
+                "gain",
+                null,
+                _config.OpeningGroupWins,
+                "nos gains disponibles",
+                _config.OpeningSource,
+                "Import initial du groupe",
+                now));
+        }
 
         return new LotoState(
-            "Équipe B Moulage — Loto-Max CEZinc",
-            new LotoSettings(6, new List<string> { "Tuesday", "Friday" }, today, true, "2468"),
+            _config.DefaultGroupName,
+            new LotoSettings(_config.DrawCostPerParticipant, new List<string>(_config.DeductionDays), today, true, "2468"),
             participants,
             transactions,
             new List<AppliedDraw>(),
@@ -1075,6 +1173,9 @@ public sealed class LotoStore(IHostEnvironment environment)
 public sealed class LotoDatabase
 {
     private readonly string _connectionString;
+    private readonly string _tablePrefix;
+    private readonly string _defaultGroupName;
+    private readonly List<string> _defaultDeductionDays;
     private readonly object _schemaGate = new();
     private bool _schemaReady;
     private readonly JsonSerializerOptions _snapshotOptions = new()
@@ -1084,12 +1185,15 @@ public sealed class LotoDatabase
         WriteIndented = false
     };
 
-    private LotoDatabase(string connectionString)
+    private LotoDatabase(string connectionString, string tablePrefix, string defaultGroupName, List<string> defaultDeductionDays)
     {
         _connectionString = connectionString;
+        _tablePrefix = tablePrefix;
+        _defaultGroupName = defaultGroupName;
+        _defaultDeductionDays = new List<string>(defaultDeductionDays);
     }
 
-    public static LotoDatabase? Create()
+    public static LotoDatabase? Create(string tablePrefix, string defaultGroupName, List<string> defaultDeductionDays)
     {
         var rawConnectionString =
             Environment.GetEnvironmentVariable("SUPABASE_DB_CONNECTION") ??
@@ -1101,7 +1205,12 @@ public sealed class LotoDatabase
             return null;
         }
 
-        return new LotoDatabase(ToNpgsqlConnectionString(rawConnectionString));
+        if (!tablePrefix.All(character => char.IsLetterOrDigit(character) || character == '_'))
+        {
+            throw new InvalidOperationException("Prefixe de table invalide.");
+        }
+
+        return new LotoDatabase(ToNpgsqlConnectionString(rawConnectionString), tablePrefix, defaultGroupName, defaultDeductionDays);
     }
 
     public LotoState? Load()
@@ -1116,12 +1225,12 @@ public sealed class LotoDatabase
         using var connection = OpenConnection();
         EnsureSchema(connection);
 
-        using var command = new NpgsqlCommand("""
+        using var command = new NpgsqlCommand(Sql("""
             SELECT payload::text
             FROM loto_state_snapshots
             ORDER BY created_at DESC, id DESC
             LIMIT 50;
-            """, connection);
+            """), connection);
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
@@ -1303,6 +1412,9 @@ public sealed class LotoDatabase
                 return;
             }
 
+            var defaultGroupNameSql = EscapeSqlLiteral(_defaultGroupName);
+            var defaultDeductionDaysSql = EscapeSqlLiteral(JsonSerializer.Serialize(_defaultDeductionDays));
+
             ExecuteNonQuery(connection, null, """
                 CREATE TABLE IF NOT EXISTS loto_settings (
                     id integer PRIMARY KEY CHECK (id = 1),
@@ -1357,11 +1469,11 @@ public sealed class LotoDatabase
                 );
                 """);
 
-            ExecuteNonQuery(connection, null, """
+            ExecuteNonQuery(connection, null, $"""
                 ALTER TABLE loto_settings
-                    ADD COLUMN IF NOT EXISTS group_name text NOT NULL DEFAULT 'Equipe B Moulage - Loto-Max CEZinc',
+                    ADD COLUMN IF NOT EXISTS group_name text NOT NULL DEFAULT '{defaultGroupNameSql}',
                     ADD COLUMN IF NOT EXISTS draw_cost_per_participant numeric(12,2) NOT NULL DEFAULT 6.00,
-                    ADD COLUMN IF NOT EXISTS deduction_days_json text NOT NULL DEFAULT '["Tuesday","Friday"]',
+                    ADD COLUMN IF NOT EXISTS deduction_days_json text NOT NULL DEFAULT '{defaultDeductionDaysSql}',
                     ADD COLUMN IF NOT EXISTS automation_start_date date NOT NULL DEFAULT DATE '2026-06-24',
                     ADD COLUMN IF NOT EXISTS automation_enabled boolean NOT NULL DEFAULT true,
                     ADD COLUMN IF NOT EXISTS admin_pin text NOT NULL DEFAULT '2468',
@@ -1393,13 +1505,13 @@ public sealed class LotoDatabase
                     ADD COLUMN IF NOT EXISTS id bigserial,
                     ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
                     ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT 'migration',
-                    ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}'::jsonb;
+                    ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT jsonb_build_object();
 
                 UPDATE loto_settings
                 SET
-                    group_name = COALESCE(group_name, 'Equipe B Moulage - Loto-Max CEZinc'),
+                    group_name = COALESCE(group_name, '{defaultGroupNameSql}'),
                     draw_cost_per_participant = COALESCE(draw_cost_per_participant, 6.00),
-                    deduction_days_json = COALESCE(deduction_days_json, '["Tuesday","Friday"]'),
+                    deduction_days_json = COALESCE(deduction_days_json, '{defaultDeductionDaysSql}'),
                     automation_start_date = COALESCE(automation_start_date, DATE '2026-06-24'),
                     automation_enabled = COALESCE(automation_enabled, true),
                     admin_pin = COALESCE(admin_pin, '2468'),
@@ -1438,7 +1550,7 @@ public sealed class LotoDatabase
     {
         LotoState? state = null;
 
-        using (var command = new NpgsqlCommand("""
+        using (var command = new NpgsqlCommand(Sql("""
             SELECT
                 group_name,
                 draw_cost_per_participant,
@@ -1449,7 +1561,7 @@ public sealed class LotoDatabase
                 last_updated_at
             FROM loto_settings
             WHERE id = 1;
-            """, connection, transaction))
+            """), connection, transaction))
         using (var reader = command.ExecuteReader())
         {
             if (!reader.Read())
@@ -1457,9 +1569,11 @@ public sealed class LotoDatabase
                 return null;
             }
 
-            var deductionDays = ReadDeductionDays(ReadString(reader, 2, """["Tuesday","Friday"]"""));
+            var deductionDays = ReadDeductionDays(
+                ReadString(reader, 2, JsonSerializer.Serialize(_defaultDeductionDays)),
+                _defaultDeductionDays);
             state = new LotoState(
-                ReadString(reader, 0, "Equipe B Moulage - Loto-Max CEZinc"),
+                ReadString(reader, 0, _defaultGroupName),
                 new LotoSettings(
                     reader.GetDecimal(1),
                     deductionDays,
@@ -1472,11 +1586,11 @@ public sealed class LotoDatabase
                 ToDateTimeOffset(reader.GetValue(6)));
         }
 
-        using (var command = new NpgsqlCommand("""
+        using (var command = new NpgsqlCommand(Sql("""
             SELECT id, name, active
             FROM loto_participants
             ORDER BY sort_order, name;
-            """, connection, transaction))
+            """), connection, transaction))
         using (var reader = command.ExecuteReader())
         {
             while (reader.Read())
@@ -1488,7 +1602,7 @@ public sealed class LotoDatabase
             }
         }
 
-        using (var command = new NpgsqlCommand("""
+        using (var command = new NpgsqlCommand(Sql("""
             SELECT
                 id,
                 transaction_date,
@@ -1501,7 +1615,7 @@ public sealed class LotoDatabase
                 created_at
             FROM loto_transactions
             ORDER BY created_at DESC;
-            """, connection, transaction))
+            """), connection, transaction))
         using (var reader = command.ExecuteReader())
         {
             while (reader.Read())
@@ -1519,11 +1633,11 @@ public sealed class LotoDatabase
             }
         }
 
-        using (var command = new NpgsqlCommand("""
+        using (var command = new NpgsqlCommand(Sql("""
             SELECT draw_date, paid_by, amount, created_at, created_by
             FROM loto_applied_draws
             ORDER BY draw_date DESC;
-            """, connection, transaction))
+            """), connection, transaction))
         using (var reader = command.ExecuteReader())
         {
             while (reader.Read())
@@ -1553,13 +1667,22 @@ public sealed class LotoDatabase
         });
     }
 
-    private static void ExecuteNonQuery(
+    private string Sql(string sql) => sql
+        .Replace("loto_state_snapshots", $"{_tablePrefix}_state_snapshots", StringComparison.Ordinal)
+        .Replace("loto_applied_draws", $"{_tablePrefix}_applied_draws", StringComparison.Ordinal)
+        .Replace("loto_transactions", $"{_tablePrefix}_transactions", StringComparison.Ordinal)
+        .Replace("loto_participants", $"{_tablePrefix}_participants", StringComparison.Ordinal)
+        .Replace("loto_settings", $"{_tablePrefix}_settings", StringComparison.Ordinal);
+
+    private static string EscapeSqlLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+
+    private void ExecuteNonQuery(
         NpgsqlConnection connection,
         NpgsqlTransaction? transaction,
         string sql,
         Action<NpgsqlParameterCollection>? bind = null)
     {
-        using var command = new NpgsqlCommand(sql, connection, transaction);
+        using var command = new NpgsqlCommand(Sql(sql), connection, transaction);
         bind?.Invoke(command.Parameters);
         command.ExecuteNonQuery();
     }
@@ -1616,17 +1739,17 @@ public sealed class LotoDatabase
     private static string ReadString(NpgsqlDataReader reader, int ordinal, string fallback) =>
         reader.IsDBNull(ordinal) ? fallback : reader.GetString(ordinal);
 
-    private static List<string> ReadDeductionDays(string value)
+    private static List<string> ReadDeductionDays(string value, List<string> fallback)
     {
         try
         {
             return JsonSerializer.Deserialize<List<string>>(value)?.Count > 0
                 ? JsonSerializer.Deserialize<List<string>>(value)!
-                : new List<string> { "Tuesday", "Friday" };
+                : new List<string>(fallback);
         }
         catch (JsonException)
         {
-            return new List<string> { "Tuesday", "Friday" };
+            return new List<string>(fallback);
         }
     }
 }
