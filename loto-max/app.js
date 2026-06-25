@@ -313,6 +313,12 @@ function renderMemberDetail() {
   if (!participant) return;
 
   const status = !participant.active ? "Inactif" : participant.balance < 0 ? "Negatif" : "Actif";
+  const paymentRequiredText = participant.active
+    ? dateLabel(participant.paymentRequiredDate)
+    : "Inactif";
+  const paymentRequiredNote = participant.active
+    ? "Premier tirage non couvert"
+    : "Aucun retrait automatique";
 
   els.detailTitle.textContent = participant.name;
   els.detailStatus.textContent = status;
@@ -329,6 +335,11 @@ function renderMemberDetail() {
       <article>
         <span>Reste apres</span>
         <strong>${money(participant.remainder)}</strong>
+      </article>
+      <article>
+        <span>Paiement requis</span>
+        <strong>${paymentRequiredText}</strong>
+        <small>${paymentRequiredNote}</small>
       </article>
     </div>
 

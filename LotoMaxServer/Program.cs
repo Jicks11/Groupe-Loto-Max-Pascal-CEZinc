@@ -781,8 +781,19 @@ public sealed class LotoStore(IHostEnvironment environment)
                 var balance = ParticipantBalance(state, participant.Id);
                 var coveredDraws = balance > 0 ? (int)Math.Floor(balance / state.Settings.DrawCostPerParticipant) : 0;
                 var remainder = balance > 0 ? balance % state.Settings.DrawCostPerParticipant : 0;
+                var paymentRequiredDate = participant.Active
+                    ? (DateOnly?)PaymentRequiredDate(state, LotoClock.Today, coveredDraws)
+                    : null;
                 var history = ParticipantHistory(state, participant.Id);
-                return new ParticipantView(participant.Id, participant.Name, participant.Active, balance, coveredDraws, remainder, history);
+                return new ParticipantView(
+                    participant.Id,
+                    participant.Name,
+                    participant.Active,
+                    balance,
+                    coveredDraws,
+                    remainder,
+                    paymentRequiredDate,
+                    history);
             })
             .ToList();
         var participantTotal = participants.Sum(participant => participant.Balance);
@@ -916,6 +927,30 @@ public sealed class LotoStore(IHostEnvironment environment)
             {
                 return date;
             }
+        }
+
+        return fromDate.AddDays(1);
+    }
+
+    private static DateOnly PaymentRequiredDate(LotoState state, DateOnly fromDate, int coveredDraws)
+    {
+        var uncoveredDrawIndex = Math.Max(0, coveredDraws);
+        var seenDraws = 0;
+
+        for (var offset = 0; offset <= 730; offset++)
+        {
+            var date = fromDate.AddDays(offset);
+            if (!IsDeductionDay(state, date) || IsDrawApplied(state, date))
+            {
+                continue;
+            }
+
+            if (seenDraws == uncoveredDrawIndex)
+            {
+                return date;
+            }
+
+            seenDraws++;
         }
 
         return fromDate.AddDays(1);
@@ -1696,6 +1731,7 @@ public sealed record ParticipantView(
     decimal Balance,
     int CoveredDraws,
     decimal Remainder,
+    DateOnly? PaymentRequiredDate,
     List<HistoryEntryView> History);
 
 public sealed record HistoryEntryView(DateOnly Date, decimal Amount, string Title, string Meta);
