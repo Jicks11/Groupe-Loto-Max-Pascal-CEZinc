@@ -205,8 +205,8 @@ function renderMetrics() {
   els.drawMeterFill.style.width = `${Math.round(coverageRatio * 100)}%`;
 
   if (state.nextDraw.coveredByGains) {
-    els.nextDrawStatus.textContent = "Paye par Nos gains";
-    els.drawMeterText.textContent = `Le prochain tirage du ${dateLabel(state.nextDraw.date)} est couvert. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans Nos gains.`;
+    els.nextDrawStatus.textContent = "Payé par nos gains";
+    els.drawMeterText.textContent = `Le prochain tirage du ${dateLabel(state.nextDraw.date)} est couvert. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
   } else {
     els.nextDrawStatus.textContent = `${money(state.nextDraw.missingAmount)} manquant`;
     els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} pour couvrir le prochain tirage du ${dateLabel(state.nextDraw.date)}. Sinon, -${money(state.drawCostPerParticipant)} par participant.`;

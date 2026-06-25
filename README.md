@@ -14,7 +14,7 @@ Fonctions deja branchees:
 - Historique global.
 - Donnees sauvegardees dans `data/loto-max-state.json`.
 - Deduction automatique prevue les mardis et vendredis a minuit.
-- Si `Nos gains` couvre le tirage, le systeme paie avec les gains au lieu de retirer 6$ a chaque participant.
+- Si `nos gains` couvre le tirage, le systeme paie avec les gains au lieu de retirer 6$ a chaque participant.
 
 PIN admin temporaire:
 

@@ -271,8 +271,8 @@ public sealed class LotoStore(IHostEnvironment environment)
                 "group_draw_payment",
                 null,
                 -drawTotal,
-                "Tirage paye par Nos gains",
-                "Nos gains",
+                "Tirage payé par nos gains",
+                "nos gains",
                 $"{activeParticipants.Count} participants proteges"));
 
             state.AppliedDraws.Insert(0, new AppliedDraw(date, "gains", drawTotal, DateTimeOffset.Now, createdBy));
@@ -534,7 +534,7 @@ public sealed class LotoStore(IHostEnvironment environment)
             "gain",
             null,
             96,
-            "Nos gains disponibles",
+            "nos gains disponibles",
             "Excel",
             "Import initial du groupe",
             now));
