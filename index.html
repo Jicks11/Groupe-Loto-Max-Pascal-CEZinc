@@ -57,6 +57,25 @@ function dateLabel(isoDate) {
   });
 }
 
+function dateTimeLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Dernière mise à jour: inconnue";
+  }
+
+  const datePart = date.toLocaleDateString("fr-CA", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
+  const timePart = date.toLocaleTimeString("fr-CA", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+
+  return `Dernière mise à jour: ${datePart} à ${timePart}`;
+}
+
 function signedMoney(value) {
   const amount = Number(value || 0);
   return amount > 0 ? `+${money(amount)}` : money(amount);
@@ -174,7 +193,7 @@ function renderMetrics() {
   els.drawTotal.textContent = money(state.drawTotal);
   els.drawFormula.textContent = `${state.participants.filter((participant) => participant.active).length} x ${money(state.drawCostPerParticipant)}`;
   els.activeCount.textContent = `${state.participants.filter((participant) => participant.active).length} actifs`;
-  els.lastUpdated.textContent = `Maj ${lastUpdated.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })}`;
+  els.lastUpdated.textContent = dateTimeLabel(lastUpdated);
   els.drawMeterFill.style.width = `${Math.round(coverageRatio * 100)}%`;
 
   if (state.nextDraw.coveredByGains) {
