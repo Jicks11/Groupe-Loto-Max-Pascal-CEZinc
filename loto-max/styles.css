@@ -468,6 +468,7 @@ select:focus {
 
 .primary-button,
 .accent-button,
+.danger-button,
 .ghost-button {
   min-height: 43px;
   border-radius: 8px;
@@ -491,6 +492,11 @@ select:focus {
 .ghost-button {
   border: 1px solid rgba(243, 255, 249, 0.16);
   background: rgba(243, 255, 249, 0.06);
+}
+
+.danger-button {
+  border: 1px solid rgba(255, 93, 104, 0.45);
+  background: rgba(255, 93, 104, 0.12);
 }
 
 .admin-note {

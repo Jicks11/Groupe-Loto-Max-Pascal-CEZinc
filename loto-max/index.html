@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#061226" />
     <title>Équipe B Moulage — Loto-Max CEZinc</title>
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260624-detail-cleanup" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260624-admin-safety" />
   </head>
   <body>
     <div class="app-shell">
@@ -158,7 +158,7 @@
 
                 <div class="button-row">
                   <button class="primary-button" type="submit">Enregistrer</button>
-                  <button class="accent-button" id="applyDraw" type="button">Appliquer tirage</button>
+                  <button class="accent-button" id="applyDraw" type="button">Retirer tirage aux actifs</button>
                 </div>
               </form>
 
@@ -198,6 +198,7 @@
               </form>
 
               <button class="ghost-button full-button" id="resetDemo" type="button">Rafraichir</button>
+              <button class="danger-button full-button" id="clearHistory" type="button">Nettoyer l'historique</button>
             </div>
 
             <p class="admin-note" id="adminNote">
@@ -221,6 +222,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-max/app.js?v=20260624-detail-cleanup" defer></script>
+    <script src="/loto-max/app.js?v=20260624-admin-safety" defer></script>
   </body>
 </html>

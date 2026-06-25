@@ -29,6 +29,7 @@ const els = {
   paymentMode: document.querySelector("#paymentMode"),
   noteInput: document.querySelector("#noteInput"),
   applyDraw: document.querySelector("#applyDraw"),
+  clearHistory: document.querySelector("#clearHistory"),
   newParticipantName: document.querySelector("#newParticipantName"),
   newParticipantBalance: document.querySelector("#newParticipantBalance"),
   newParticipantPaymentMode: document.querySelector("#newParticipantPaymentMode"),
@@ -329,15 +330,21 @@ async function addTransaction(event) {
 
 async function applyDraw() {
   try {
-    const confirmed = window.confirm(`Appliquer le prochain tirage du ${dateLabel(state.nextDraw.date)}?`);
+    const date = els.dateInput.value || state.nextDraw.date;
+    const activeCount = state.participants.filter((participant) => participant.active).length;
+    const confirmed = window.confirm(
+      `Retirer ${money(state.drawCostPerParticipant)} a ${activeCount} participants actifs pour le ${dateLabel(date)}?\n\n` +
+        `Total: ${money(activeCount * state.drawCostPerParticipant)}.\n` +
+        "Cette action ignore nos gains et ne peut pas etre appliquee deux fois pour la meme date."
+    );
     if (!confirmed) return;
 
-    state = await api("/api/draws/apply", {
+    state = await api("/api/draws/participants", {
       method: "POST",
-      body: JSON.stringify({ adminPin: getAdminPin() })
+      body: JSON.stringify({ date, adminPin: getAdminPin() })
     });
     render();
-    showToast("Tirage applique.");
+    showToast("Retrait applique a tous les participants actifs.");
   } catch (error) {
     if (String(error.message).includes("PIN")) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
@@ -385,6 +392,28 @@ async function addParticipant(event) {
   }
 }
 
+async function clearHistory() {
+  try {
+    const confirmed = window.confirm(
+      "Nettoyer l'historique public?\n\n" +
+        "Les soldes actuels seront conserves comme soldes de depart. Les anciennes lignes d'historique seront retirees."
+    );
+    if (!confirmed) return;
+
+    state = await api("/api/admin/clear-history", {
+      method: "POST",
+      body: JSON.stringify({ adminPin: getAdminPin() })
+    });
+    render();
+    showToast("Historique nettoye. Soldes conserves.");
+  } catch (error) {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message);
+  }
+}
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
@@ -403,6 +432,7 @@ function setToday() {
 els.form.addEventListener("submit", addTransaction);
 els.participantForm.addEventListener("submit", addParticipant);
 els.applyDraw.addEventListener("click", applyDraw);
+els.clearHistory.addEventListener("click", clearHistory);
 els.adminToggle.addEventListener("click", unlockAdmin);
 els.transactionType.addEventListener("change", renderSelectors);
 els.resetDemo.addEventListener("click", () => loadState());

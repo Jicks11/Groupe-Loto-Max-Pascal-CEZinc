@@ -66,11 +66,35 @@ app.MapPost("/api/draws/apply", (DrawRequest request, LotoStore store) =>
     }
 });
 
+app.MapPost("/api/draws/participants", (DrawRequest request, LotoStore store) =>
+{
+    try
+    {
+        return Results.Ok(store.ApplyParticipantDraw(request));
+    }
+    catch (LotoException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+});
+
 app.MapPost("/api/admin/reseed", (AdminRequest request, LotoStore store) =>
 {
     try
     {
         return Results.Ok(store.Reseed(request));
+    }
+    catch (LotoException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+});
+
+app.MapPost("/api/admin/clear-history", (AdminRequest request, LotoStore store) =>
+{
+    try
+    {
+        return Results.Ok(store.ClearHistory(request));
     }
     catch (LotoException exception)
     {
@@ -242,6 +266,20 @@ public sealed class LotoStore(IHostEnvironment environment)
         }
     }
 
+    public LotoView ApplyParticipantDraw(DrawRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load();
+            ValidateAdmin(state, request.AdminPin);
+            var date = request.Date ?? LotoClock.Today;
+            ApplyParticipantDraw(state, date, "manuel");
+            state = state with { LastUpdatedAt = LotoClock.Now };
+            Save(state);
+            return BuildView(state);
+        }
+    }
+
     public LotoView Reseed(AdminRequest request)
     {
         lock (_gate)
@@ -251,6 +289,62 @@ public sealed class LotoStore(IHostEnvironment environment)
             var seed = SeedState();
             Save(seed);
             return BuildView(seed);
+        }
+    }
+
+    public LotoView ClearHistory(AdminRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load();
+            ValidateAdmin(state, request.AdminPin);
+
+            var now = LotoClock.Now;
+            var today = LotoClock.Today;
+            var transactions = new List<LotoTransaction>();
+            var groupWins = GroupWins(state);
+
+            if (groupWins != 0)
+            {
+                transactions.Add(new LotoTransaction(
+                    Guid.NewGuid().ToString("N"),
+                    today,
+                    "opening",
+                    null,
+                    groupWins,
+                    "nos gains disponibles",
+                    "Historique",
+                    "Historique nettoyé",
+                    now));
+            }
+
+            foreach (var participant in state.Participants)
+            {
+                var balance = ParticipantBalance(state, participant.Id);
+                if (balance == 0)
+                {
+                    continue;
+                }
+
+                transactions.Add(new LotoTransaction(
+                    Guid.NewGuid().ToString("N"),
+                    today,
+                    "opening",
+                    participant.Id,
+                    balance,
+                    "Solde de départ",
+                    "Historique",
+                    "Historique nettoyé",
+                    now));
+            }
+
+            state = state with
+            {
+                Transactions = transactions,
+                LastUpdatedAt = now
+            };
+            Save(state);
+            return BuildView(state);
         }
     }
 
@@ -340,6 +434,35 @@ public sealed class LotoStore(IHostEnvironment environment)
                 "Tirage",
                 "Auto",
                 "Deduction automatique"));
+        }
+
+        state.AppliedDraws.Insert(0, new AppliedDraw(date, "participants", drawTotal, LotoClock.Now, createdBy));
+    }
+
+    private void ApplyParticipantDraw(LotoState state, DateOnly date, string createdBy)
+    {
+        if (IsDrawApplied(state, date))
+        {
+            throw new LotoException($"Le tirage du {date:yyyy-MM-dd} est deja applique.");
+        }
+
+        var activeParticipants = state.Participants.Where(participant => participant.Active).ToList();
+        if (activeParticipants.Count == 0)
+        {
+            throw new LotoException("Aucun participant actif.");
+        }
+
+        var drawTotal = activeParticipants.Count * state.Settings.DrawCostPerParticipant;
+        foreach (var participant in activeParticipants)
+        {
+            state.Transactions.Insert(0, NewTransaction(
+                date,
+                "draw",
+                participant.Id,
+                -state.Settings.DrawCostPerParticipant,
+                "Tirage",
+                "Manuel",
+                "Retrait admin a tous les participants actifs"));
         }
 
         state.AppliedDraws.Insert(0, new AppliedDraw(date, "participants", drawTotal, LotoClock.Now, createdBy));
@@ -443,6 +566,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     private List<HistoryEntryView> ParticipantHistory(LotoState state, string participantId) =>
         state.Transactions
             .Where(transaction => transaction.ParticipantId == participantId)
+            .Where(transaction => transaction.Type != "opening")
             .OrderByDescending(transaction => transaction.Date)
             .ThenByDescending(transaction => transaction.CreatedAt)
             .Take(25)
@@ -451,6 +575,7 @@ public sealed class LotoStore(IHostEnvironment environment)
 
     private List<HistoryEntryView> GroupHistory(LotoState state) =>
         state.Transactions
+            .Where(transaction => transaction.Type != "opening")
             .OrderByDescending(transaction => transaction.Date)
             .ThenByDescending(transaction => transaction.CreatedAt)
             .Take(50)

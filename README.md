@@ -12,6 +12,8 @@ Fonctions deja branchees:
 - Detail au clic par participant: solde, nombre de tirages couverts, historique date.
 - Saisie admin pour depot, gain de groupe et correction.
 - Ajout admin de nouveaux participants, actifs ou inactifs, avec solde initial optionnel.
+- Retrait manuel d'un tirage a tous les participants actifs, avec confirmation.
+- Nettoyage admin de l'historique en conservant les soldes actuels.
 - Historique global.
 - Donnees sauvegardees dans `data/loto-max-state.json`.
 - Deduction automatique prevue les mardis et vendredis a minuit, en heure Quebec/Toronto.
