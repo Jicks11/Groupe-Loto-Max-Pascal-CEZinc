@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.FileProviders;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,7 +21,13 @@ var staticRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredStaticRoot
     : configuredStaticRoot);
 
 app.MapGet("/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok", checkedAt = LotoClock.Now, timeZone = LotoClock.TimeZoneId }));
+app.MapGet("/api/health", (LotoStore store) => Results.Ok(new
+{
+    status = "ok",
+    checkedAt = LotoClock.Now,
+    timeZone = LotoClock.TimeZoneId,
+    storage = store.StorageMode
+}));
 app.MapGet("/loto-max/", () => Results.Content(File.ReadAllText(Path.Combine(staticRoot, "index.html")), "text/html; charset=utf-8"));
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -47,6 +54,30 @@ app.MapPost("/api/participants", (ParticipantRequest request, LotoStore store) =
     try
     {
         return Results.Ok(store.AddParticipant(request));
+    }
+    catch (LotoException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+});
+
+app.MapPost("/api/participants/status", (ParticipantStatusRequest request, LotoStore store) =>
+{
+    try
+    {
+        return Results.Ok(store.SetParticipantActive(request));
+    }
+    catch (LotoException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+});
+
+app.MapPost("/api/participants/delete", (ParticipantDeleteRequest request, LotoStore store) =>
+{
+    try
+    {
+        return Results.Ok(store.DeleteParticipant(request));
     }
     catch (LotoException exception)
     {
@@ -144,11 +175,14 @@ public sealed class LotoStore(IHostEnvironment environment)
         ? Path.Combine(environment.ContentRootPath, "..", "data", "loto-max-state.json")
         : Environment.GetEnvironmentVariable("LOTOMAX_DATA_PATH")!);
     private readonly string? _adminPin = Environment.GetEnvironmentVariable("LOTOMAX_ADMIN_PIN");
+    private readonly LotoDatabase? _database = LotoDatabase.Create();
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true
     };
+
+    public string StorageMode => _database is null ? "file" : "postgres";
 
     public LotoView GetView()
     {
@@ -192,12 +226,46 @@ public sealed class LotoStore(IHostEnvironment environment)
                     request.PaymentMode,
                     request.Note));
             }
+            else if (type == "set_balance")
+            {
+                var participant = FindParticipant(state, request.ParticipantId);
+                var currentBalance = ParticipantBalance(state, participant.Id);
+                var difference = amount - currentBalance;
+                if (difference == 0)
+                {
+                    throw new LotoException("Le solde est deja a ce montant.");
+                }
+
+                state.Transactions.Insert(0, NewTransaction(
+                    date,
+                    "correction",
+                    participant.Id,
+                    difference,
+                    "Ajustement solde",
+                    request.PaymentMode,
+                    request.Note));
+            }
             else
             {
                 var participant = FindParticipant(state, request.ParticipantId);
-                var transactionAmount = type == "correction" ? amount : Math.Abs(amount);
-                var title = type == "correction" ? "Correction" : "Depot";
-                var transactionType = type == "correction" ? "correction" : "deposit";
+                var transactionAmount = type switch
+                {
+                    "correction" => amount,
+                    "withdrawal" => -Math.Abs(amount),
+                    _ => Math.Abs(amount)
+                };
+                var title = type switch
+                {
+                    "correction" => "Correction",
+                    "withdrawal" => "Retrait trop-perçu",
+                    _ => "Depot"
+                };
+                var transactionType = type switch
+                {
+                    "correction" => "correction",
+                    "withdrawal" => "withdrawal",
+                    _ => "deposit"
+                };
 
                 state.Transactions.Insert(0, NewTransaction(
                     date,
@@ -237,15 +305,64 @@ public sealed class LotoStore(IHostEnvironment environment)
             state.Participants.Add(participant);
 
             var openingBalance = request.OpeningBalance ?? 0;
-            state.Transactions.Insert(0, NewTransaction(
-                request.Date ?? LotoClock.Today,
-                "opening",
-                participant.Id,
-                openingBalance,
-                openingBalance == 0 ? "Participant ajouté" : "Solde initial",
-                request.PaymentMode,
-                request.Note));
+            if (openingBalance != 0)
+            {
+                state.Transactions.Insert(0, NewTransaction(
+                    request.Date ?? LotoClock.Today,
+                    "opening",
+                    participant.Id,
+                    openingBalance,
+                    "Solde initial",
+                    request.PaymentMode,
+                    request.Note));
+            }
 
+            state = state with { LastUpdatedAt = LotoClock.Now };
+            Save(state);
+            return BuildView(state);
+        }
+    }
+
+    public LotoView SetParticipantActive(ParticipantStatusRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load();
+            ValidateAdmin(state, request.AdminPin);
+
+            var index = state.Participants.FindIndex(participant => participant.Id == request.ParticipantId);
+            if (index < 0)
+            {
+                throw new LotoException("Participant introuvable.");
+            }
+
+            state.Participants[index] = state.Participants[index] with { Active = request.Active };
+            state = state with { LastUpdatedAt = LotoClock.Now };
+            Save(state);
+            return BuildView(state);
+        }
+    }
+
+    public LotoView DeleteParticipant(ParticipantDeleteRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load();
+            ValidateAdmin(state, request.AdminPin);
+            var participant = FindParticipant(state, request.ParticipantId);
+            var balance = ParticipantBalance(state, participant.Id);
+
+            if (balance != 0)
+            {
+                throw new LotoException("Impossible de supprimer: le solde doit etre a 0$. Desactive le participant a la place.");
+            }
+
+            if (state.Transactions.Any(transaction => transaction.ParticipantId == participant.Id))
+            {
+                throw new LotoException("Impossible de supprimer: ce participant a un historique. Desactive le participant a la place.");
+            }
+
+            state.Participants.RemoveAll(item => item.Id == participant.Id);
             state = state with { LastUpdatedAt = LotoClock.Now };
             Save(state);
             return BuildView(state);
@@ -470,11 +587,45 @@ public sealed class LotoStore(IHostEnvironment environment)
 
     private LotoState Load()
     {
+        if (_database is not null)
+        {
+            var databaseState = _database.Load();
+            if (databaseState is not null)
+            {
+                if (databaseState.Participants.Count == 0)
+                {
+                    var recoveredState = _database.LoadLatestSnapshotWithParticipants() ?? LoadFileOrSeed(saveIfMissing: false);
+                    _database.Save(recoveredState, "empty-database-recovery");
+                    return recoveredState;
+                }
+
+                if (NormalizeState(databaseState))
+                {
+                    Save(databaseState);
+                }
+
+                return databaseState;
+            }
+
+            var imported = LoadFileOrSeed(saveIfMissing: false);
+            _database.Save(imported, "initial-import");
+            return imported;
+        }
+
+        return LoadFileOrSeed(saveIfMissing: true);
+    }
+
+    private LotoState LoadFileOrSeed(bool saveIfMissing)
+    {
         Directory.CreateDirectory(Path.GetDirectoryName(_dataPath)!);
         if (!File.Exists(_dataPath))
         {
             var seed = SeedState();
-            Save(seed);
+            if (saveIfMissing)
+            {
+                Save(seed);
+            }
+
             return seed;
         }
 
@@ -490,7 +641,23 @@ public sealed class LotoStore(IHostEnvironment environment)
 
     private void Save(LotoState state)
     {
+        if (state.Participants.Count == 0)
+        {
+            throw new LotoException("Protection des soldes: sauvegarde refusee car aucun participant n'est present.");
+        }
+
+        if (_database is not null)
+        {
+            _database.Save(state, "save");
+            return;
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(_dataPath)!);
+        if (File.Exists(_dataPath))
+        {
+            File.Copy(_dataPath, $"{_dataPath}.bak", overwrite: true);
+        }
+
         var json = JsonSerializer.Serialize(state, _jsonOptions);
         File.WriteAllText(_dataPath, json);
     }
@@ -765,6 +932,435 @@ public sealed class LotoStore(IHostEnvironment environment)
     }
 }
 
+public sealed class LotoDatabase
+{
+    private readonly string _connectionString;
+    private readonly object _schemaGate = new();
+    private bool _schemaReady;
+    private readonly JsonSerializerOptions _snapshotOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = false
+    };
+
+    private LotoDatabase(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+
+    public static LotoDatabase? Create()
+    {
+        var rawConnectionString =
+            Environment.GetEnvironmentVariable("SUPABASE_DB_CONNECTION") ??
+            Environment.GetEnvironmentVariable("DATABASE_URL") ??
+            Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING");
+
+        if (string.IsNullOrWhiteSpace(rawConnectionString))
+        {
+            return null;
+        }
+
+        return new LotoDatabase(ToNpgsqlConnectionString(rawConnectionString));
+    }
+
+    public LotoState? Load()
+    {
+        using var connection = OpenConnection();
+        EnsureSchema(connection);
+        return LoadCore(connection, null);
+    }
+
+    public LotoState? LoadLatestSnapshotWithParticipants()
+    {
+        using var connection = OpenConnection();
+        EnsureSchema(connection);
+
+        using var command = new NpgsqlCommand("""
+            SELECT payload::text
+            FROM loto_state_snapshots
+            ORDER BY created_at DESC, id DESC
+            LIMIT 50;
+            """, connection);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var state = JsonSerializer.Deserialize<LotoState>(reader.GetString(0), _snapshotOptions);
+            if (state?.Participants.Count > 0)
+            {
+                return state with { LastUpdatedAt = LotoClock.Now };
+            }
+        }
+
+        return null;
+    }
+
+    public void Save(LotoState state, string reason)
+    {
+        using var connection = OpenConnection();
+        EnsureSchema(connection);
+        using var transaction = connection.BeginTransaction();
+
+        var existing = LoadCore(connection, transaction);
+        if (existing is not null)
+        {
+            SaveSnapshot(connection, transaction, existing, reason);
+        }
+
+        ExecuteNonQuery(connection, transaction, "DELETE FROM loto_applied_draws;");
+        ExecuteNonQuery(connection, transaction, "DELETE FROM loto_transactions;");
+        ExecuteNonQuery(connection, transaction, "DELETE FROM loto_participants;");
+        ExecuteNonQuery(connection, transaction, "DELETE FROM loto_settings;");
+
+        ExecuteNonQuery(connection, transaction, """
+            INSERT INTO loto_settings (
+                id,
+                group_name,
+                draw_cost_per_participant,
+                deduction_days_json,
+                automation_start_date,
+                automation_enabled,
+                admin_pin,
+                last_updated_at
+            )
+            VALUES (
+                1,
+                @group_name,
+                @draw_cost,
+                @deduction_days_json,
+                @automation_start_date,
+                @automation_enabled,
+                @admin_pin,
+                @last_updated_at
+            );
+            """, parameters =>
+        {
+            parameters.AddWithValue("group_name", state.GroupName);
+            parameters.AddWithValue("draw_cost", state.Settings.DrawCostPerParticipant);
+            parameters.AddWithValue("deduction_days_json", JsonSerializer.Serialize(state.Settings.DeductionDays));
+            parameters.AddWithValue("automation_start_date", ToDateTime(state.Settings.AutomationStartDate));
+            parameters.AddWithValue("automation_enabled", state.Settings.AutomationEnabled);
+            parameters.AddWithValue("admin_pin", state.Settings.AdminPin);
+            parameters.AddWithValue("last_updated_at", state.LastUpdatedAt.ToUniversalTime());
+        });
+
+        for (var index = 0; index < state.Participants.Count; index++)
+        {
+            var participant = state.Participants[index];
+            ExecuteNonQuery(connection, transaction, """
+                INSERT INTO loto_participants (id, name, active, sort_order)
+                VALUES (@id, @name, @active, @sort_order);
+                """, parameters =>
+            {
+                parameters.AddWithValue("id", participant.Id);
+                parameters.AddWithValue("name", participant.Name);
+                parameters.AddWithValue("active", participant.Active);
+                parameters.AddWithValue("sort_order", index);
+            });
+        }
+
+        foreach (var item in state.Transactions)
+        {
+            ExecuteNonQuery(connection, transaction, """
+                INSERT INTO loto_transactions (
+                    id,
+                    transaction_date,
+                    type,
+                    participant_id,
+                    amount,
+                    title,
+                    payment_mode,
+                    note,
+                    created_at
+                )
+                VALUES (
+                    @id,
+                    @transaction_date,
+                    @type,
+                    @participant_id,
+                    @amount,
+                    @title,
+                    @payment_mode,
+                    @note,
+                    @created_at
+                );
+                """, parameters =>
+            {
+                parameters.AddWithValue("id", item.Id);
+                parameters.AddWithValue("transaction_date", ToDateTime(item.Date));
+                parameters.AddWithValue("type", item.Type);
+                parameters.AddWithValue("participant_id", string.IsNullOrWhiteSpace(item.ParticipantId) ? DBNull.Value : item.ParticipantId);
+                parameters.AddWithValue("amount", item.Amount);
+                parameters.AddWithValue("title", item.Title);
+                parameters.AddWithValue("payment_mode", item.PaymentMode);
+                parameters.AddWithValue("note", item.Note);
+                parameters.AddWithValue("created_at", item.CreatedAt.ToUniversalTime());
+            });
+        }
+
+        foreach (var draw in state.AppliedDraws)
+        {
+            ExecuteNonQuery(connection, transaction, """
+                INSERT INTO loto_applied_draws (draw_date, paid_by, amount, created_at, created_by)
+                VALUES (@draw_date, @paid_by, @amount, @created_at, @created_by);
+                """, parameters =>
+            {
+                parameters.AddWithValue("draw_date", ToDateTime(draw.Date));
+                parameters.AddWithValue("paid_by", draw.PaidBy);
+                parameters.AddWithValue("amount", draw.Amount);
+                parameters.AddWithValue("created_at", draw.CreatedAt.ToUniversalTime());
+                parameters.AddWithValue("created_by", draw.CreatedBy);
+            });
+        }
+
+        transaction.Commit();
+    }
+
+    private NpgsqlConnection OpenConnection()
+    {
+        var connection = new NpgsqlConnection(_connectionString);
+        connection.Open();
+        return connection;
+    }
+
+    private void EnsureSchema(NpgsqlConnection connection)
+    {
+        if (_schemaReady)
+        {
+            return;
+        }
+
+        lock (_schemaGate)
+        {
+            if (_schemaReady)
+            {
+                return;
+            }
+
+            ExecuteNonQuery(connection, null, """
+                CREATE TABLE IF NOT EXISTS loto_settings (
+                    id integer PRIMARY KEY CHECK (id = 1),
+                    group_name text NOT NULL,
+                    draw_cost_per_participant numeric(12,2) NOT NULL,
+                    deduction_days_json text NOT NULL,
+                    automation_start_date date NOT NULL,
+                    automation_enabled boolean NOT NULL,
+                    admin_pin text NOT NULL,
+                    last_updated_at timestamptz NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS loto_participants (
+                    id text PRIMARY KEY,
+                    name text NOT NULL,
+                    active boolean NOT NULL,
+                    sort_order integer NOT NULL DEFAULT 0,
+                    created_at timestamptz NOT NULL DEFAULT now()
+                );
+
+                CREATE TABLE IF NOT EXISTS loto_transactions (
+                    id text PRIMARY KEY,
+                    transaction_date date NOT NULL,
+                    type text NOT NULL,
+                    participant_id text NULL REFERENCES loto_participants(id) ON DELETE SET NULL,
+                    amount numeric(12,2) NOT NULL,
+                    title text NOT NULL,
+                    payment_mode text NOT NULL,
+                    note text NOT NULL,
+                    created_at timestamptz NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_loto_transactions_participant
+                    ON loto_transactions(participant_id);
+
+                CREATE INDEX IF NOT EXISTS idx_loto_transactions_date
+                    ON loto_transactions(transaction_date DESC, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS loto_applied_draws (
+                    draw_date date PRIMARY KEY,
+                    paid_by text NOT NULL,
+                    amount numeric(12,2) NOT NULL,
+                    created_at timestamptz NOT NULL,
+                    created_by text NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS loto_state_snapshots (
+                    id bigserial PRIMARY KEY,
+                    created_at timestamptz NOT NULL,
+                    reason text NOT NULL,
+                    payload jsonb NOT NULL
+                );
+                """);
+
+            _schemaReady = true;
+        }
+    }
+
+    private LotoState? LoadCore(NpgsqlConnection connection, NpgsqlTransaction? transaction)
+    {
+        LotoState? state = null;
+
+        using (var command = new NpgsqlCommand("""
+            SELECT
+                group_name,
+                draw_cost_per_participant,
+                deduction_days_json,
+                automation_start_date,
+                automation_enabled,
+                admin_pin,
+                last_updated_at
+            FROM loto_settings
+            WHERE id = 1;
+            """, connection, transaction))
+        using (var reader = command.ExecuteReader())
+        {
+            if (!reader.Read())
+            {
+                return null;
+            }
+
+            var deductionDays = JsonSerializer.Deserialize<List<string>>(reader.GetString(2)) ?? new List<string>();
+            state = new LotoState(
+                reader.GetString(0),
+                new LotoSettings(
+                    reader.GetDecimal(1),
+                    deductionDays,
+                    ToDateOnly(reader.GetDateTime(3)),
+                    reader.GetBoolean(4),
+                    reader.GetString(5)),
+                new List<LotoParticipant>(),
+                new List<LotoTransaction>(),
+                new List<AppliedDraw>(),
+                ToDateTimeOffset(reader.GetValue(6)));
+        }
+
+        using (var command = new NpgsqlCommand("""
+            SELECT id, name, active
+            FROM loto_participants
+            ORDER BY sort_order, name;
+            """, connection, transaction))
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                state.Participants.Add(new LotoParticipant(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetBoolean(2)));
+            }
+        }
+
+        using (var command = new NpgsqlCommand("""
+            SELECT
+                id,
+                transaction_date,
+                type,
+                participant_id,
+                amount,
+                title,
+                payment_mode,
+                note,
+                created_at
+            FROM loto_transactions
+            ORDER BY created_at DESC;
+            """, connection, transaction))
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                state.Transactions.Add(new LotoTransaction(
+                    reader.GetString(0),
+                    ToDateOnly(reader.GetDateTime(1)),
+                    reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.GetDecimal(4),
+                    reader.GetString(5),
+                    reader.GetString(6),
+                    reader.GetString(7),
+                    ToDateTimeOffset(reader.GetValue(8))));
+            }
+        }
+
+        using (var command = new NpgsqlCommand("""
+            SELECT draw_date, paid_by, amount, created_at, created_by
+            FROM loto_applied_draws
+            ORDER BY draw_date DESC;
+            """, connection, transaction))
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                state.AppliedDraws.Add(new AppliedDraw(
+                    ToDateOnly(reader.GetDateTime(0)),
+                    reader.GetString(1),
+                    reader.GetDecimal(2),
+                    ToDateTimeOffset(reader.GetValue(3)),
+                    reader.GetString(4)));
+            }
+        }
+
+        return state;
+    }
+
+    private void SaveSnapshot(NpgsqlConnection connection, NpgsqlTransaction transaction, LotoState state, string reason)
+    {
+        ExecuteNonQuery(connection, transaction, """
+            INSERT INTO loto_state_snapshots (created_at, reason, payload)
+            VALUES (@created_at, @reason, CAST(@payload AS jsonb));
+            """, parameters =>
+        {
+            parameters.AddWithValue("created_at", LotoClock.Now.ToUniversalTime());
+            parameters.AddWithValue("reason", string.IsNullOrWhiteSpace(reason) ? "save" : reason);
+            parameters.AddWithValue("payload", JsonSerializer.Serialize(state, _snapshotOptions));
+        });
+    }
+
+    private static void ExecuteNonQuery(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        string sql,
+        Action<NpgsqlParameterCollection>? bind = null)
+    {
+        using var command = new NpgsqlCommand(sql, connection, transaction);
+        bind?.Invoke(command.Parameters);
+        command.ExecuteNonQuery();
+    }
+
+    private static string ToNpgsqlConnectionString(string rawConnectionString)
+    {
+        if (!rawConnectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
+            !rawConnectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        {
+            return rawConnectionString;
+        }
+
+        var uri = new Uri(rawConnectionString);
+        var credentials = uri.UserInfo.Split(':', 2);
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = uri.Host,
+            Port = uri.Port > 0 ? uri.Port : 5432,
+            Database = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/')),
+            Username = credentials.Length > 0 ? Uri.UnescapeDataString(credentials[0]) : "",
+            Password = credentials.Length > 1 ? Uri.UnescapeDataString(credentials[1]) : "",
+            SslMode = SslMode.Require
+        };
+
+        return builder.ConnectionString;
+    }
+
+    private static DateTime ToDateTime(DateOnly date) => date.ToDateTime(TimeOnly.MinValue);
+
+    private static DateOnly ToDateOnly(DateTime date) => DateOnly.FromDateTime(date);
+
+    private static DateTimeOffset ToDateTimeOffset(object value) =>
+        value switch
+        {
+            DateTimeOffset offset => offset,
+            DateTime date => new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Utc)),
+            _ => DateTimeOffset.Parse(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "")
+        };
+}
+
 public static class LotoClock
 {
     private static readonly TimeZoneInfo EasternTimeZone = ResolveEasternTimeZone();
@@ -844,6 +1440,10 @@ public sealed record ParticipantRequest(
     string? PaymentMode,
     string? Note,
     string? AdminPin);
+
+public sealed record ParticipantStatusRequest(string? ParticipantId, bool Active, string? AdminPin);
+
+public sealed record ParticipantDeleteRequest(string? ParticipantId, string? AdminPin);
 
 public sealed record DrawRequest(DateOnly? Date, string? AdminPin);
 

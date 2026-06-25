@@ -11,13 +11,18 @@ Fonctions deja branchees:
 - Soldes de tous les participants visibles par tout le groupe.
 - Detail au clic par participant: solde, nombre de tirages couverts, historique date.
 - Saisie admin pour depot, gain de groupe et correction.
+- Retrait admin pour trop-percu: le montant est toujours soustrait du solde du participant.
 - Ajout admin de nouveaux participants, actifs ou inactifs, avec solde initial optionnel.
+- Activation, desactivation et suppression securisee de participants.
+- Modification d'un solde exact par transaction de correction.
 - Retrait manuel d'un tirage a tous les participants actifs, avec confirmation.
 - Nettoyage admin de l'historique en conservant les soldes actuels.
 - Historique global.
-- Donnees sauvegardees dans `data/loto-max-state.json`.
+- Donnees sauvegardees dans PostgreSQL/Supabase si `DATABASE_URL` ou `SUPABASE_DB_CONNECTION` est configure.
+- Fallback local dans `data/loto-max-state.json` seulement pour developper sur le PC.
 - Deduction automatique prevue les mardis et vendredis a minuit, en heure Quebec/Toronto.
 - Si `nos gains` couvre le tirage, le systeme paie avec les gains au lieu de retirer 6$ a chaque participant.
+- Snapshots de securite dans la table `loto_state_snapshots` avant chaque sauvegarde en base.
 
 PIN admin temporaire:
 
@@ -62,6 +67,7 @@ Le projet contient maintenant:
 - `/api/health`: endpoint de verification pour l'hebergeur.
 - `LOTOMAX_DATA_PATH`: chemin du fichier de donnees en production.
 - `LOTOMAX_ADMIN_PIN`: PIN admin a mettre comme variable secrete, pas dans le code.
+- `DATABASE_URL` ou `SUPABASE_DB_CONNECTION`: connexion PostgreSQL/Supabase pour garder les donnees apres chaque redeploiement.
 
 Publication recommandee:
 
@@ -78,7 +84,7 @@ Exemple d'URL courte avec le nom de service Render:
 https://loto-equipe-b.onrender.com
 ```
 
-Important: sans disque persistant ou base de donnees, les soldes pourraient disparaitre lors d'un redeploiement. Le fichier de donnees cloud doit rester dans `/var/data/loto-max-state.json`.
+Important: avec Supabase/PostgreSQL, les soldes, participants, paiements, retraits automatiques et historiques restent en base apres chaque redeploiement Render. Le fichier local sert seulement de fallback si aucune connexion Postgres n'est configuree.
 
 ## Fonctions
 
