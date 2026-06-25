@@ -5,6 +5,7 @@ COPY LotoMaxServer/LotoMaxServer.csproj LotoMaxServer/
 RUN dotnet restore LotoMaxServer/LotoMaxServer.csproj
 
 COPY LotoMaxServer/ LotoMaxServer/
+RUN dotnet restore LotoMaxServer/LotoMaxServer.csproj
 RUN dotnet publish LotoMaxServer/LotoMaxServer.csproj -c Release -o /app/publish --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
