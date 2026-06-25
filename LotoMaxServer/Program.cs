@@ -29,7 +29,8 @@ builder.Services.AddCors(options =>
                 return host == "groupe-loto-max-pascal-cezinc.onrender.com" ||
                     host == "localhost" ||
                     host == "127.0.0.1" ||
-                    host.EndsWith(".pages.dev", StringComparison.OrdinalIgnoreCase);
+                    host.EndsWith(".pages.dev", StringComparison.OrdinalIgnoreCase) ||
+                    host.EndsWith(".workers.dev", StringComparison.OrdinalIgnoreCase);
             })
             .AllowAnyHeader()
             .AllowAnyMethod();
