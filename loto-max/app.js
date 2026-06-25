@@ -60,20 +60,28 @@ function dateLabel(isoDate) {
 function dateTimeLabel(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return "Dernière mise à jour: inconnue";
+    return "Derniere mise a jour: inconnue";
   }
 
-  const datePart = date.toLocaleDateString("fr-CA", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-  const timePart = date.toLocaleTimeString("fr-CA", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  const weekdays = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
+  const months = [
+    "Janvier",
+    "Fevrier",
+    "Mars",
+    "Avril",
+    "Mai",
+    "Juin",
+    "Juillet",
+    "Aout",
+    "Septembre",
+    "Octobre",
+    "Novembre",
+    "Decembre"
+  ];
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
 
-  return `Dernière mise à jour: ${datePart} à ${timePart}`;
+  return `Derniere mise a jour: ${weekdays[date.getDay()]} le ${date.getDate()} ${months[date.getMonth()]} a ${hour}h${minute}`;
 }
 
 function signedMoney(value) {
