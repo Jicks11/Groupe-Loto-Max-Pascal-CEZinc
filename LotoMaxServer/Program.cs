@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.FileProviders;
 
@@ -33,6 +35,18 @@ app.MapPost("/api/transactions", (TransactionRequest request, LotoStore store) =
     try
     {
         return Results.Ok(store.AddTransaction(request));
+    }
+    catch (LotoException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+});
+
+app.MapPost("/api/participants", (ParticipantRequest request, LotoStore store) =>
+{
+    try
+    {
+        return Results.Ok(store.AddParticipant(request));
     }
     catch (LotoException exception)
     {
@@ -170,6 +184,43 @@ public sealed class LotoStore(IHostEnvironment environment)
                     request.PaymentMode,
                     request.Note));
             }
+
+            state = state with { LastUpdatedAt = LotoClock.Now };
+            Save(state);
+            return BuildView(state);
+        }
+    }
+
+    public LotoView AddParticipant(ParticipantRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load();
+            ValidateAdmin(state, request.AdminPin);
+
+            var name = (request.Name ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new LotoException("Entre le nom du participant.");
+            }
+
+            if (state.Participants.Any(participant => string.Equals(participant.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new LotoException("Ce participant existe deja.");
+            }
+
+            var participant = new LotoParticipant(NewParticipantId(state, name), name, request.Active ?? true);
+            state.Participants.Add(participant);
+
+            var openingBalance = request.OpeningBalance ?? 0;
+            state.Transactions.Insert(0, NewTransaction(
+                request.Date ?? LotoClock.Today,
+                "opening",
+                participant.Id,
+                openingBalance,
+                openingBalance == 0 ? "Participant ajouté" : "Solde initial",
+                request.PaymentMode,
+                request.Note));
 
             state = state with { LastUpdatedAt = LotoClock.Now };
             Save(state);
@@ -429,6 +480,46 @@ public sealed class LotoStore(IHostEnvironment environment)
             ?? throw new LotoException("Participant introuvable.");
     }
 
+    private static string NewParticipantId(LotoState state, string name)
+    {
+        var normalized = name.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder();
+        var pendingDash = false;
+
+        foreach (var character in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(character))
+            {
+                if (pendingDash && builder.Length > 0)
+                {
+                    builder.Append('-');
+                }
+
+                builder.Append(char.ToLowerInvariant(character));
+                pendingDash = false;
+                continue;
+            }
+
+            pendingDash = builder.Length > 0;
+        }
+
+        var baseId = builder.Length == 0 ? "participant" : builder.ToString();
+        var candidate = baseId;
+        var suffix = 2;
+        while (state.Participants.Any(participant => participant.Id == candidate))
+        {
+            candidate = $"{baseId}-{suffix}";
+            suffix++;
+        }
+
+        return candidate;
+    }
+
     private static bool IsDrawApplied(LotoState state, DateOnly date) =>
         state.AppliedDraws.Any(draw => draw.Date == date);
 
@@ -616,6 +707,15 @@ public sealed record TransactionRequest(
     string? ParticipantId,
     decimal Amount,
     DateOnly? Date,
+    string? PaymentMode,
+    string? Note,
+    string? AdminPin);
+
+public sealed record ParticipantRequest(
+    string? Name,
+    decimal? OpeningBalance,
+    DateOnly? Date,
+    bool? Active,
     string? PaymentMode,
     string? Note,
     string? AdminPin);

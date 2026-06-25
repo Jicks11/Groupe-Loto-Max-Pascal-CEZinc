@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#061226" />
     <title>Équipe B Moulage — Loto-Max CEZinc</title>
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260624-text-fixes" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260624-participants" />
   </head>
   <body>
     <div class="app-shell">
@@ -163,6 +163,41 @@
                 </div>
               </form>
 
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="participantForm">
+                <h3>Ajouter un participant</h3>
+
+                <label>
+                  Nom complet
+                  <input id="newParticipantName" type="text" maxlength="80" placeholder="Ex: Nouveau participant" />
+                </label>
+
+                <div class="form-row">
+                  <label>
+                    Solde initial
+                    <input id="newParticipantBalance" type="number" step="0.01" value="0" />
+                  </label>
+                  <label>
+                    Mode
+                    <select id="newParticipantPaymentMode">
+                      <option value="Interac">Interac</option>
+                      <option value="Comptant">Comptant</option>
+                      <option value="Cheque">Cheque</option>
+                      <option value="Credit manuel">Credit manuel</option>
+                      <option value="Correction">Correction</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label class="checkbox-line">
+                  <input id="newParticipantActive" type="checkbox" checked />
+                  Actif pour les prochains tirages
+                </label>
+
+                <button class="accent-button" type="submit">Ajouter participant</button>
+              </form>
+
               <button class="ghost-button full-button" id="resetDemo" type="button">Rafraichir</button>
             </div>
 
@@ -187,6 +222,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-max/app.js?v=20260624-text-fixes" defer></script>
+    <script src="/loto-max/app.js?v=20260624-participants" defer></script>
   </body>
 </html>

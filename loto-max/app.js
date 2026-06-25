@@ -20,6 +20,7 @@ const els = {
   memberDetail: document.querySelector("#memberDetail"),
   groupHistory: document.querySelector("#groupHistory"),
   form: document.querySelector("#transactionForm"),
+  participantForm: document.querySelector("#participantForm"),
   transactionType: document.querySelector("#transactionType"),
   participantField: document.querySelector("#participantField"),
   participantSelect: document.querySelector("#participantSelect"),
@@ -28,6 +29,10 @@ const els = {
   paymentMode: document.querySelector("#paymentMode"),
   noteInput: document.querySelector("#noteInput"),
   applyDraw: document.querySelector("#applyDraw"),
+  newParticipantName: document.querySelector("#newParticipantName"),
+  newParticipantBalance: document.querySelector("#newParticipantBalance"),
+  newParticipantPaymentMode: document.querySelector("#newParticipantPaymentMode"),
+  newParticipantActive: document.querySelector("#newParticipantActive"),
   adminToggle: document.querySelector("#adminToggle"),
   adminLocked: document.querySelector("#adminLocked"),
   adminContent: document.querySelector("#adminContent"),
@@ -350,6 +355,45 @@ async function applyDraw() {
   }
 }
 
+async function addParticipant(event) {
+  event.preventDefault();
+
+  try {
+    const name = els.newParticipantName.value.trim();
+    const body = {
+      name,
+      openingBalance: Number(els.newParticipantBalance.value || 0),
+      date: els.dateInput.value,
+      active: els.newParticipantActive.checked,
+      paymentMode: els.newParticipantPaymentMode.value,
+      note: els.newParticipantActive.checked ? "Actif aux tirages" : "Inactif aux tirages",
+      adminPin: getAdminPin()
+    };
+
+    state = await api("/api/participants", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+
+    const created = state.participants.find((participant) => participant.name.toLowerCase() === name.toLowerCase());
+    if (created) {
+      selectedId = created.id;
+      localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
+    }
+
+    els.newParticipantName.value = "";
+    els.newParticipantBalance.value = "0";
+    els.newParticipantActive.checked = true;
+    render();
+    showToast("Participant ajouté. Le coût du prochain tirage est recalculé.");
+  } catch (error) {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message);
+  }
+}
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("show");
@@ -366,6 +410,7 @@ function setToday() {
 }
 
 els.form.addEventListener("submit", addTransaction);
+els.participantForm.addEventListener("submit", addParticipant);
 els.applyDraw.addEventListener("click", applyDraw);
 els.adminToggle.addEventListener("click", unlockAdmin);
 els.transactionType.addEventListener("change", renderSelectors);

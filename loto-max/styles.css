@@ -410,6 +410,18 @@ small {
   gap: 11px;
 }
 
+.participant-admin-form h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.02rem;
+}
+
+.admin-divider {
+  height: 1px;
+  margin: 16px 0;
+  background: rgba(126, 232, 255, 0.2);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -434,6 +446,17 @@ input:focus,
 select:focus {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 3px rgba(35, 214, 255, 0.14);
+}
+
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.checkbox-line input {
+  width: auto;
+  min-height: 0;
 }
 
 .form-row,
