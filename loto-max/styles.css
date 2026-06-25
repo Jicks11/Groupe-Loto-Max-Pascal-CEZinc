@@ -668,7 +668,6 @@ select:focus {
     text-align: center;
   }
 
-  .participant-row,
   .history-row,
   .detail-top {
     grid-template-columns: 1fr;
@@ -676,5 +675,19 @@ select:focus {
 
   .money {
     justify-self: start;
+  }
+
+  .participant-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .participant-row > span:first-child {
+    min-width: 0;
+  }
+
+  .participant-row .money {
+    justify-self: end;
+    text-align: right;
   }
 }
