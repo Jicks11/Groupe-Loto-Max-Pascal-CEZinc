@@ -607,6 +607,14 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
+  .lower-grid .history-panel {
+    order: 1;
+  }
+
+  .lower-grid .admin-panel {
+    order: 2;
+  }
+
   .topbar {
     display: grid;
   }

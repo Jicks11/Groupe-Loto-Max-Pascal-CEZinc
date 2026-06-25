@@ -164,7 +164,19 @@ public sealed class DrawScheduler(LotoStore store, ILogger<DrawScheduler> logger
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        await Task.Yield();
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        do
         {
             try
             {
@@ -174,9 +186,8 @@ public sealed class DrawScheduler(LotoStore store, ILogger<DrawScheduler> logger
             {
                 logger.LogError(exception, "Erreur pendant le traitement automatique des tirages.");
             }
-
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
         }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }
 
