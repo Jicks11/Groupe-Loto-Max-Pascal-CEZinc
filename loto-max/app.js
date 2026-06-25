@@ -352,7 +352,7 @@ async function applyDraw() {
     const confirmed = window.confirm(
       `Retirer ${money(state.drawCostPerParticipant)} a ${activeCount} participants actifs pour le ${dateLabel(date)}?\n\n` +
         `Total: ${money(activeCount * state.drawCostPerParticipant)}.\n` +
-        "Cette action ignore nos gains et ne peut pas etre appliquee deux fois pour la meme date."
+        "Cette action ignore nos gains. Elle peut servir de correction meme si la date a deja ete traitee."
     );
     if (!confirmed) return;
 
