@@ -193,6 +193,9 @@ public sealed class LotoStore(IHostEnvironment environment)
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true
     };
+    private LotoState? _cachedState;
+    private DateTimeOffset _lastDatabaseRefresh = DateTimeOffset.MinValue;
+    private static readonly TimeSpan DatabaseRefreshInterval = TimeSpan.FromMinutes(5);
 
     public string StorageMode => _database is null ? "file" : "postgres";
 
@@ -200,7 +203,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             var changed = ProcessDueDraws(state, LotoClock.Today);
             if (changed)
             {
@@ -215,7 +218,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
 
             var date = request.Date ?? LotoClock.Today;
@@ -299,7 +302,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
 
             var name = (request.Name ?? "").Trim();
@@ -339,7 +342,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
 
             var index = state.Participants.FindIndex(participant => participant.Id == request.ParticipantId);
@@ -359,7 +362,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
             var participant = FindParticipant(state, request.ParticipantId);
             var balance = ParticipantBalance(state, participant.Id);
@@ -385,7 +388,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
             var date = request.Date ?? NextDueDate(state, LotoClock.Today);
             ApplyDraw(state, date, "manuel");
@@ -399,7 +402,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
             var date = request.Date ?? LotoClock.Today;
             ApplyParticipantDraw(state, date, "manuel");
@@ -413,7 +416,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var current = Load();
+            var current = Load(useCache: true);
             ValidateAdmin(current, request.AdminPin);
             var seed = SeedState();
             Save(seed);
@@ -425,7 +428,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             ValidateAdmin(state, request.AdminPin);
 
             var now = LotoClock.Now;
@@ -481,7 +484,13 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            ValidateAdmin(Load(), request.AdminPin);
+            if (!string.IsNullOrWhiteSpace(_adminPin))
+            {
+                ValidateAdminPin(_adminPin, request.AdminPin);
+                return;
+            }
+
+            ValidateAdmin(Load(useCache: true), request.AdminPin);
         }
     }
 
@@ -489,7 +498,7 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         lock (_gate)
         {
-            var state = Load();
+            var state = Load(useCache: true);
             var changed = ProcessDueDraws(state, LotoClock.Today);
             if (changed)
             {
@@ -599,8 +608,14 @@ public sealed class LotoStore(IHostEnvironment environment)
         }
     }
 
-    private LotoState Load()
+    private LotoState Load(bool useCache)
     {
+        if (useCache && _cachedState is not null && LotoClock.Now - _lastDatabaseRefresh < DatabaseRefreshInterval)
+        {
+            return _cachedState;
+        }
+
+        LotoState state;
         if (_database is not null)
         {
             try
@@ -612,7 +627,9 @@ public sealed class LotoStore(IHostEnvironment environment)
                     {
                         var recoveredState = _database.LoadLatestSnapshotWithParticipants() ?? LoadFileOrSeedSafely();
                         TrySaveDatabase(recoveredState, "empty-database-recovery");
-                        return recoveredState;
+                        state = recoveredState;
+                        CacheState(state, refreshedFromDatabase: true);
+                        return state;
                     }
 
                     if (NormalizeState(databaseState))
@@ -620,20 +637,42 @@ public sealed class LotoStore(IHostEnvironment environment)
                         TrySaveDatabase(databaseState, "normalize");
                     }
 
-                    return databaseState;
+                    state = databaseState;
+                    CacheState(state, refreshedFromDatabase: true);
+                    return state;
                 }
 
                 var imported = LoadFileOrSeedSafely();
                 TrySaveDatabase(imported, "initial-import");
-                return imported;
+                state = imported;
+                CacheState(state, refreshedFromDatabase: true);
+                return state;
             }
             catch
             {
-                return LoadFileOrSeedSafely();
+                if (_cachedState is not null)
+                {
+                    return _cachedState;
+                }
+
+                state = LoadFileOrSeedSafely();
+                CacheState(state, refreshedFromDatabase: false);
+                return state;
             }
         }
 
-        return LoadFileOrSeed(saveIfMissing: true);
+        state = LoadFileOrSeed(saveIfMissing: true);
+        CacheState(state, refreshedFromDatabase: false);
+        return state;
+    }
+
+    private void CacheState(LotoState state, bool refreshedFromDatabase)
+    {
+        _cachedState = state;
+        if (refreshedFromDatabase)
+        {
+            _lastDatabaseRefresh = LotoClock.Now;
+        }
     }
 
     private LotoState LoadFileOrSeedSafely()
@@ -697,6 +736,7 @@ public sealed class LotoStore(IHostEnvironment environment)
         if (_database is not null)
         {
             _database.Save(state, "save");
+            CacheState(state, refreshedFromDatabase: true);
             return;
         }
 
@@ -708,6 +748,7 @@ public sealed class LotoStore(IHostEnvironment environment)
 
         var json = JsonSerializer.Serialize(state, _jsonOptions);
         File.WriteAllText(_dataPath, json);
+        CacheState(state, refreshedFromDatabase: false);
     }
 
     private static bool NormalizeState(LotoState state)
@@ -902,6 +943,11 @@ public sealed class LotoStore(IHostEnvironment environment)
     private void ValidateAdmin(LotoState state, string? adminPin)
     {
         var expectedPin = string.IsNullOrWhiteSpace(_adminPin) ? state.Settings.AdminPin : _adminPin;
+        ValidateAdminPin(expectedPin, adminPin);
+    }
+
+    private static void ValidateAdminPin(string? expectedPin, string? adminPin)
+    {
         if (string.IsNullOrWhiteSpace(expectedPin) || adminPin != expectedPin)
         {
             throw new LotoException("PIN admin invalide.");
