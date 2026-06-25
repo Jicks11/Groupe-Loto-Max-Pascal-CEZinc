@@ -3,9 +3,18 @@ const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
 const REFRESH_INTERVAL_MS = 30000;
 const API_TIMEOUT_MS = 15000;
-const API_BASE = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
+const RENDER_API_ORIGIN = "https://groupe-loto-max-pascal-cezinc.onrender.com";
+const LOCAL_HOSTS = new Set(["", "localhost", "127.0.0.1"]);
+const host = window.location.hostname.toLowerCase();
+const sameOriginApi = LOCAL_HOSTS.has(host) || host.endsWith(".onrender.com");
+const API_ORIGIN = (window.LOTO_API_ORIGIN || (sameOriginApi ? "" : RENDER_API_ORIGIN)).replace(/\/$/, "");
+const API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
+const API_BASE = `${API_ORIGIN}${API_BASE_PATH}`;
 
 const els = {
+  startupOverlay: document.querySelector("#startupOverlay"),
+  startupMessage: document.querySelector("#startupMessage"),
+  startupProgress: document.querySelector("#startupProgress"),
   lastUpdated: document.querySelector("#lastUpdated"),
   nextDrawStatus: document.querySelector("#nextDrawStatus"),
   drawMeterFill: document.querySelector("#drawMeterFill"),
@@ -53,6 +62,47 @@ let state = null;
 let selectedId = localStorage.getItem(SELECTED_MEMBER_KEY);
 let adminUnlocked = false;
 let stateLoading = false;
+let startupStartedAt = 0;
+let startupTimer = null;
+let startupRetryTimer = null;
+
+function setStartupProgress(message, percent) {
+  if (els.startupMessage) {
+    els.startupMessage.textContent = message;
+  }
+  if (els.startupProgress) {
+    els.startupProgress.style.width = `${Math.max(8, Math.min(96, percent))}%`;
+  }
+}
+
+function showStartupLoading() {
+  if (!els.startupOverlay || state) return;
+
+  startupStartedAt = startupStartedAt || Date.now();
+  els.startupOverlay.classList.remove("hidden");
+  window.clearInterval(startupTimer);
+  startupTimer = window.setInterval(() => {
+    const elapsed = Date.now() - startupStartedAt;
+    const percent = elapsed < 5000
+      ? 18 + elapsed / 5000 * 45
+      : Math.min(90, 63 + (elapsed - 5000) / 20000 * 27);
+    const message = elapsed > 7000
+      ? "Le service de donnees se reveille. Les soldes vont apparaitre automatiquement."
+      : "Connexion aux donnees du groupe.";
+    setStartupProgress(message, percent);
+  }, 450);
+}
+
+function hideStartupLoading() {
+  window.clearInterval(startupTimer);
+  window.clearTimeout(startupRetryTimer);
+  startupTimer = null;
+  startupRetryTimer = null;
+  setStartupProgress("Donnees chargees.", 100);
+  window.setTimeout(() => {
+    els.startupOverlay?.classList.add("hidden");
+  }, 180);
+}
 
 function money(value) {
   return new Intl.NumberFormat("fr-CA", {
@@ -166,6 +216,7 @@ async function loadState({ silent = false } = {}) {
   stateLoading = true;
   if (!silent && !state) {
     els.lastUpdated.textContent = "Chargement des donnees...";
+    showStartupLoading();
   }
 
   try {
@@ -174,9 +225,15 @@ async function loadState({ silent = false } = {}) {
       selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
     }
     render();
+    hideStartupLoading();
   } catch (error) {
     if (!silent) {
       showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
+      if (!state) {
+        setStartupProgress("Le service de donnees se reveille. Nouvel essai dans quelques secondes.", 88);
+        window.clearTimeout(startupRetryTimer);
+        startupRetryTimer = window.setTimeout(() => loadState(), 5000);
+      }
     }
   } finally {
     stateLoading = false;

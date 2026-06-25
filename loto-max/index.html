@@ -5,9 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#061226" />
     <title>Équipe B Moulage — Loto-Max CEZinc</title>
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260625-startup-mobile-admin" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260625-cloudflare-loading" />
   </head>
   <body>
+    <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
+      <div class="startup-card">
+        <div class="startup-logo">Loto</div>
+        <p class="eyebrow">Connexion au groupe</p>
+        <h2>Chargement des soldes</h2>
+        <p id="startupMessage">On pr&eacute;pare les donn&eacute;es du groupe.</p>
+        <div class="startup-progress" aria-hidden="true">
+          <span id="startupProgress"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="app-shell">
       <header class="topbar">
         <div class="brand-lockup">
@@ -241,6 +253,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-max/app.js?v=20260625-api-fix" defer></script>
+    <script src="/loto-max/app.js?v=20260625-cloudflare-loading" defer></script>
   </body>
 </html>

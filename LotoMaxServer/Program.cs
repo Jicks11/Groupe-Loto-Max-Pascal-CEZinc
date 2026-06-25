@@ -13,8 +13,31 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 builder.Services.AddSingleton<LotoGroupRegistry>();
 builder.Services.AddHostedService<DrawScheduler>();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("CloudflarePagesFrontend", policy =>
+    {
+        policy
+            .SetIsOriginAllowed(origin =>
+            {
+                if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return false;
+                }
+
+                var host = uri.Host.ToLowerInvariant();
+                return host == "groupe-loto-max-pascal-cezinc.onrender.com" ||
+                    host == "localhost" ||
+                    host == "127.0.0.1" ||
+                    host.EndsWith(".pages.dev", StringComparison.OrdinalIgnoreCase);
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 
 var app = builder.Build();
+app.UseCors("CloudflarePagesFrontend");
 var configuredLotoMaxRoot = Environment.GetEnvironmentVariable("LOTOMAX_STATIC_ROOT");
 var lotoMaxRoot = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredLotoMaxRoot)
     ? Path.Combine(app.Environment.ContentRootPath, "..", "loto-max")
