@@ -47,6 +47,10 @@ app.MapPost("/api/transactions", (TransactionRequest request, LotoStore store) =
     {
         return Results.BadRequest(new { error = exception.Message });
     }
+    catch (Exception exception)
+    {
+        return Results.BadRequest(new { error = $"Erreur technique pendant la transaction: {exception.Message}" });
+    }
 });
 
 app.MapPost("/api/participants", (ParticipantRequest request, LotoStore store) =>
@@ -58,6 +62,10 @@ app.MapPost("/api/participants", (ParticipantRequest request, LotoStore store) =
     catch (LotoException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (Exception exception)
+    {
+        return Results.BadRequest(new { error = $"Erreur technique pendant l'ajout du participant: {exception.Message}" });
     }
 });
 
@@ -106,6 +114,10 @@ app.MapPost("/api/draws/participants", (DrawRequest request, LotoStore store) =>
     catch (LotoException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (Exception exception)
+    {
+        return Results.BadRequest(new { error = $"Erreur technique pendant le retrait: {exception.Message}" });
     }
 });
 
@@ -558,10 +570,7 @@ public sealed class LotoStore(IHostEnvironment environment)
 
     private void ApplyParticipantDraw(LotoState state, DateOnly date, string createdBy)
     {
-        if (IsDrawApplied(state, date))
-        {
-            throw new LotoException($"Le tirage du {date:yyyy-MM-dd} est deja applique.");
-        }
+        var alreadyApplied = IsDrawApplied(state, date);
 
         var activeParticipants = state.Participants.Where(participant => participant.Active).ToList();
         if (activeParticipants.Count == 0)
@@ -579,10 +588,15 @@ public sealed class LotoStore(IHostEnvironment environment)
                 -state.Settings.DrawCostPerParticipant,
                 "Tirage",
                 "Manuel",
-                "Retrait admin a tous les participants actifs"));
+                alreadyApplied
+                    ? "Retrait admin supplementaire a tous les participants actifs"
+                    : "Retrait admin a tous les participants actifs"));
         }
 
-        state.AppliedDraws.Insert(0, new AppliedDraw(date, "participants", drawTotal, LotoClock.Now, createdBy));
+        if (!alreadyApplied)
+        {
+            state.AppliedDraws.Insert(0, new AppliedDraw(date, "participants", drawTotal, LotoClock.Now, createdBy));
+        }
     }
 
     private LotoState Load()
@@ -1102,8 +1116,19 @@ public sealed class LotoDatabase
             });
         }
 
+        var participantIds = state.Participants.Select(participant => participant.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var savedTransactionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in state.Transactions)
         {
+            if (!savedTransactionIds.Add(item.Id))
+            {
+                continue;
+            }
+
+            var participantId = string.IsNullOrWhiteSpace(item.ParticipantId) || !participantIds.Contains(item.ParticipantId)
+                ? null
+                : item.ParticipantId;
+
             ExecuteNonQuery(connection, transaction, """
                 INSERT INTO loto_transactions (
                     id,
@@ -1132,7 +1157,7 @@ public sealed class LotoDatabase
                 parameters.AddWithValue("id", item.Id);
                 parameters.AddWithValue("transaction_date", ToDateTime(item.Date));
                 parameters.AddWithValue("type", item.Type);
-                parameters.AddWithValue("participant_id", string.IsNullOrWhiteSpace(item.ParticipantId) ? DBNull.Value : item.ParticipantId);
+                parameters.AddWithValue("participant_id", participantId is null ? DBNull.Value : participantId);
                 parameters.AddWithValue("amount", item.Amount);
                 parameters.AddWithValue("title", item.Title);
                 parameters.AddWithValue("payment_mode", item.PaymentMode);
@@ -1141,8 +1166,14 @@ public sealed class LotoDatabase
             });
         }
 
+        var savedDrawDates = new HashSet<DateOnly>();
         foreach (var draw in state.AppliedDraws)
         {
+            if (!savedDrawDates.Add(draw.Date))
+            {
+                continue;
+            }
+
             ExecuteNonQuery(connection, transaction, """
                 INSERT INTO loto_applied_draws (draw_date, paid_by, amount, created_at, created_by)
                 VALUES (@draw_date, @paid_by, @amount, @created_at, @created_by);
