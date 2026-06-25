@@ -23,6 +23,7 @@
 html {
   min-height: 100%;
   background: var(--bg);
+  touch-action: manipulation;
 }
 
 body {
@@ -31,6 +32,7 @@ body {
   color: var(--text);
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   overflow-x: hidden;
+  touch-action: manipulation;
   background:
     radial-gradient(circle at 18% 0%, rgba(35, 214, 255, 0.22), transparent 32%),
     radial-gradient(circle at 88% 12%, rgba(14, 141, 255, 0.18), transparent 34%),
