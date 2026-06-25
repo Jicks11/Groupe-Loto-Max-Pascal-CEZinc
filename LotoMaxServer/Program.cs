@@ -589,35 +589,58 @@ public sealed class LotoStore(IHostEnvironment environment)
     {
         if (_database is not null)
         {
-            var databaseState = _database.Load();
-            if (databaseState is not null)
+            try
             {
-                if (databaseState.Participants.Count == 0)
+                var databaseState = _database.Load();
+                if (databaseState is not null)
                 {
-                    var recoveredState = _database.LoadLatestSnapshotWithParticipants() ?? LoadFileOrSeed(saveIfMissing: false);
-                    _database.Save(recoveredState, "empty-database-recovery");
-                    return recoveredState;
+                    if (databaseState.Participants.Count == 0)
+                    {
+                        var recoveredState = _database.LoadLatestSnapshotWithParticipants() ?? LoadFileOrSeedSafely();
+                        TrySaveDatabase(recoveredState, "empty-database-recovery");
+                        return recoveredState;
+                    }
+
+                    if (NormalizeState(databaseState))
+                    {
+                        TrySaveDatabase(databaseState, "normalize");
+                    }
+
+                    return databaseState;
                 }
 
-                if (NormalizeState(databaseState))
-                {
-                    Save(databaseState);
-                }
-
-                return databaseState;
+                var imported = LoadFileOrSeedSafely();
+                TrySaveDatabase(imported, "initial-import");
+                return imported;
             }
-
-            var imported = LoadFileOrSeed(saveIfMissing: false);
-            _database.Save(imported, "initial-import");
-            return imported;
+            catch
+            {
+                return LoadFileOrSeedSafely();
+            }
         }
 
         return LoadFileOrSeed(saveIfMissing: true);
     }
 
+    private LotoState LoadFileOrSeedSafely()
+    {
+        try
+        {
+            return LoadFileOrSeed(saveIfMissing: false);
+        }
+        catch
+        {
+            return SeedState();
+        }
+    }
+
     private LotoState LoadFileOrSeed(bool saveIfMissing)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_dataPath)!);
+        if (saveIfMissing)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_dataPath)!);
+        }
+
         if (!File.Exists(_dataPath))
         {
             var seed = SeedState();
@@ -637,6 +660,17 @@ public sealed class LotoStore(IHostEnvironment environment)
         }
 
         return state;
+    }
+
+    private void TrySaveDatabase(LotoState state, string reason)
+    {
+        try
+        {
+            _database?.Save(state, reason);
+        }
+        catch
+        {
+        }
     }
 
     private void Save(LotoState state)
@@ -985,8 +1019,17 @@ public sealed class LotoDatabase
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var state = JsonSerializer.Deserialize<LotoState>(reader.GetString(0), _snapshotOptions);
-            if (state?.Participants.Count > 0)
+            LotoState? state;
+            try
+            {
+                state = JsonSerializer.Deserialize<LotoState>(reader.GetString(0), _snapshotOptions);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (state?.Participants?.Count > 0)
             {
                 return state with { LastUpdatedAt = LotoClock.Now };
             }
@@ -1291,7 +1334,7 @@ public sealed class LotoDatabase
                 return null;
             }
 
-            var deductionDays = JsonSerializer.Deserialize<List<string>>(reader.GetString(2)) ?? new List<string>();
+            var deductionDays = ReadDeductionDays(ReadString(reader, 2, """["Tuesday","Friday"]"""));
             state = new LotoState(
                 ReadString(reader, 0, "Equipe B Moulage - Loto-Max CEZinc"),
                 new LotoSettings(
@@ -1435,6 +1478,20 @@ public sealed class LotoDatabase
 
     private static string ReadString(NpgsqlDataReader reader, int ordinal, string fallback) =>
         reader.IsDBNull(ordinal) ? fallback : reader.GetString(ordinal);
+
+    private static List<string> ReadDeductionDays(string value)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(value)?.Count > 0
+                ? JsonSerializer.Deserialize<List<string>>(value)!
+                : new List<string> { "Tuesday", "Friday" };
+        }
+        catch (JsonException)
+        {
+            return new List<string> { "Tuesday", "Friday" };
+        }
+    }
 }
 
 public static class LotoClock
