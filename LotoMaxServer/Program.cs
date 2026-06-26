@@ -301,7 +301,7 @@ public sealed record LotoGroupConfig(
         "loto-649-state.json",
         "LOTO649_ADMIN_PIN",
         "Famille Taillefer - 6/49",
-        6,
+        5,
         new List<string> { "Wednesday", "Saturday" },
         17,
         "Excel",
@@ -340,7 +340,7 @@ public sealed class LotoStore
             : Environment.GetEnvironmentVariable(config.DataPathEnvVar)!);
         _adminPin = Environment.GetEnvironmentVariable(config.AdminPinEnvVar)
             ?? Environment.GetEnvironmentVariable("LOTOMAX_ADMIN_PIN");
-        _database = LotoDatabase.Create(config.TablePrefix, config.DefaultGroupName, config.DeductionDays);
+        _database = LotoDatabase.Create(config.TablePrefix, config.DefaultGroupName, config.DrawCostPerParticipant, config.DeductionDays);
     }
 
     public string GroupId => _config.GroupId;
@@ -780,7 +780,7 @@ public sealed class LotoStore
                         return state;
                     }
 
-                    if (NormalizeState(databaseState))
+                    if (NormalizeState(ref databaseState))
                     {
                         TrySaveDatabase(databaseState, "normalize");
                     }
@@ -855,7 +855,7 @@ public sealed class LotoStore
 
         var json = File.ReadAllText(_dataPath);
         var state = JsonSerializer.Deserialize<LotoState>(json, _jsonOptions) ?? SeedState();
-        if (NormalizeState(state))
+        if (NormalizeState(ref state))
         {
             Save(state);
         }
@@ -899,8 +899,20 @@ public sealed class LotoStore
         CacheState(state, refreshedFromDatabase: false);
     }
 
-    private bool NormalizeState(LotoState state)
+    private bool NormalizeState(ref LotoState state)
     {
+        var changed = false;
+        if (string.Equals(_config.GroupId, "loto-649", StringComparison.OrdinalIgnoreCase) &&
+            state.Settings.DrawCostPerParticipant != _config.DrawCostPerParticipant)
+        {
+            state = state with
+            {
+                Settings = state.Settings with { DrawCostPerParticipant = _config.DrawCostPerParticipant },
+                LastUpdatedAt = LotoClock.Now
+            };
+            changed = true;
+        }
+
         var days = state.Settings.DeductionDays;
         var expectedDays = _config.DeductionDays;
         var alreadyExpected =
@@ -909,7 +921,7 @@ public sealed class LotoStore
 
         if (alreadyExpected)
         {
-            return false;
+            return changed;
         }
 
         var hasOldSchedule =
@@ -921,7 +933,7 @@ public sealed class LotoStore
 
         if (!shouldApplyConfiguredSchedule)
         {
-            return false;
+            return changed;
         }
 
         days.Clear();
@@ -1199,6 +1211,7 @@ public sealed class LotoDatabase
     private readonly string _connectionString;
     private readonly string _tablePrefix;
     private readonly string _defaultGroupName;
+    private readonly decimal _defaultDrawCost;
     private readonly List<string> _defaultDeductionDays;
     private readonly object _schemaGate = new();
     private bool _schemaReady;
@@ -1209,15 +1222,16 @@ public sealed class LotoDatabase
         WriteIndented = false
     };
 
-    private LotoDatabase(string connectionString, string tablePrefix, string defaultGroupName, List<string> defaultDeductionDays)
+    private LotoDatabase(string connectionString, string tablePrefix, string defaultGroupName, decimal defaultDrawCost, List<string> defaultDeductionDays)
     {
         _connectionString = connectionString;
         _tablePrefix = tablePrefix;
         _defaultGroupName = defaultGroupName;
+        _defaultDrawCost = defaultDrawCost;
         _defaultDeductionDays = new List<string>(defaultDeductionDays);
     }
 
-    public static LotoDatabase? Create(string tablePrefix, string defaultGroupName, List<string> defaultDeductionDays)
+    public static LotoDatabase? Create(string tablePrefix, string defaultGroupName, decimal defaultDrawCost, List<string> defaultDeductionDays)
     {
         var rawConnectionString =
             Environment.GetEnvironmentVariable("SUPABASE_DB_CONNECTION") ??
@@ -1234,7 +1248,7 @@ public sealed class LotoDatabase
             throw new InvalidOperationException("Prefixe de table invalide.");
         }
 
-        return new LotoDatabase(ToNpgsqlConnectionString(rawConnectionString), tablePrefix, defaultGroupName, defaultDeductionDays);
+        return new LotoDatabase(ToNpgsqlConnectionString(rawConnectionString), tablePrefix, defaultGroupName, defaultDrawCost, defaultDeductionDays);
     }
 
     public LotoState? Load()
@@ -1437,6 +1451,7 @@ public sealed class LotoDatabase
             }
 
             var defaultGroupNameSql = EscapeSqlLiteral(_defaultGroupName);
+            var defaultDrawCostSql = _defaultDrawCost.ToString(CultureInfo.InvariantCulture);
             var defaultDeductionDaysSql = EscapeSqlLiteral(JsonSerializer.Serialize(_defaultDeductionDays));
 
             ExecuteNonQuery(connection, null, """
@@ -1496,7 +1511,7 @@ public sealed class LotoDatabase
             ExecuteNonQuery(connection, null, $"""
                 ALTER TABLE loto_settings
                     ADD COLUMN IF NOT EXISTS group_name text NOT NULL DEFAULT '{defaultGroupNameSql}',
-                    ADD COLUMN IF NOT EXISTS draw_cost_per_participant numeric(12,2) NOT NULL DEFAULT 6.00,
+                    ADD COLUMN IF NOT EXISTS draw_cost_per_participant numeric(12,2) NOT NULL DEFAULT {defaultDrawCostSql},
                     ADD COLUMN IF NOT EXISTS deduction_days_json text NOT NULL DEFAULT '{defaultDeductionDaysSql}',
                     ADD COLUMN IF NOT EXISTS automation_start_date date NOT NULL DEFAULT DATE '2026-06-24',
                     ADD COLUMN IF NOT EXISTS automation_enabled boolean NOT NULL DEFAULT true,
@@ -1534,7 +1549,7 @@ public sealed class LotoDatabase
                 UPDATE loto_settings
                 SET
                     group_name = COALESCE(group_name, '{defaultGroupNameSql}'),
-                    draw_cost_per_participant = COALESCE(draw_cost_per_participant, 6.00),
+                    draw_cost_per_participant = COALESCE(draw_cost_per_participant, {defaultDrawCostSql}),
                     deduction_days_json = COALESCE(deduction_days_json, '{defaultDeductionDaysSql}'),
                     automation_start_date = COALESCE(automation_start_date, DATE '2026-06-24'),
                     automation_enabled = COALESCE(automation_enabled, true),

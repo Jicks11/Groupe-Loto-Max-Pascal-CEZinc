@@ -516,7 +516,7 @@ small {
 
 .admin-contact-card {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid rgba(126, 232, 255, 0.24);
   border-radius: 8px;
   padding: 14px;
