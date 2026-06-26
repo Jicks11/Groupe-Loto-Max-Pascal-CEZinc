@@ -10,6 +10,7 @@ const sameOriginApi = LOCAL_HOSTS.has(host) || host.endsWith(".onrender.com");
 const API_ORIGIN = (window.LOTO_API_ORIGIN || (sameOriginApi ? "" : RENDER_API_ORIGIN)).replace(/\/$/, "");
 const API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
 const API_BASE = `${API_ORIGIN}${API_BASE_PATH}`;
+const ADMIN_BUTTON_LABEL = "Mode Admin r\u00e9serv\u00e9 \u00e0 Pascal";
 
 const els = {
   startupOverlay: document.querySelector("#startupOverlay"),
@@ -275,7 +276,7 @@ async function unlockAdmin() {
 function renderAdminMode() {
   els.adminLocked.classList.toggle("hidden", adminUnlocked);
   els.adminContent.classList.toggle("hidden", !adminUnlocked);
-  els.adminToggle.textContent = adminUnlocked ? "Admin actif" : "Mode admin";
+  els.adminToggle.textContent = adminUnlocked ? "Admin actif - Pascal" : ADMIN_BUTTON_LABEL;
 }
 
 function getSelectedParticipant() {
@@ -641,7 +642,7 @@ els.transactionType.addEventListener("change", renderSelectors);
 els.resetDemo.addEventListener("click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
 
 els.resetDemo.textContent = "Rafraichir";
-els.adminNote.textContent = "Les participants voient tout en lecture seule. Les actions admin demandent le PIN.";
+els.adminNote.textContent = "";
 
 setToday();
 loadState();

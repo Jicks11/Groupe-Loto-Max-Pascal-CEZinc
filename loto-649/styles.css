@@ -508,6 +508,65 @@ small {
   background: rgba(126, 232, 255, 0.2);
 }
 
+.admin-heading {
+  align-items: start;
+}
+
+.admin-reserved-button {
+  min-width: min(100%, 230px);
+  border-color: rgba(126, 232, 255, 0.4);
+  background: linear-gradient(135deg, rgba(35, 214, 255, 0.18), rgba(14, 141, 255, 0.18));
+  box-shadow: inset 0 0 18px rgba(35, 214, 255, 0.08);
+}
+
+.admin-contact-card {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(126, 232, 255, 0.24);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(35, 214, 255, 0.08);
+}
+
+.admin-contact-card span {
+  color: var(--cyan);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.admin-contact-card strong {
+  font-size: 1.22rem;
+}
+
+.admin-contact-card p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.admin-contact-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.admin-contact-links a {
+  color: var(--text);
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.admin-contact-links a:hover {
+  color: var(--cyan);
+}
+
+.admin-contact-links em {
+  color: var(--muted);
+  font-style: normal;
+}
+
 label {
   display: grid;
   gap: 6px;
