@@ -677,27 +677,39 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: false);
-            var expectedLastUpdatedAt = state.LastUpdatedAt;
-            ValidateAdmin(state, request.AdminPin);
-
-            var jackpotAmount = CleanDrawInfoText(request.JackpotAmount, 80);
-            var secondaryPrizes = CleanDrawInfoText(request.SecondaryPrizes, 120);
-            var now = LotoClock.Now;
-
-            state = state with
+            try
             {
-                Settings = state.Settings with
-                {
-                    JackpotAmount = jackpotAmount,
-                    SecondaryPrizes = secondaryPrizes,
-                    PrizeInfoUpdatedAt = now
-                },
-                LastUpdatedAt = now
-            };
-            Save(state, expectedLastUpdatedAt);
-            return BuildView(state);
+                return UpdateDrawInfoCore(request);
+            }
+            catch (Exception exception) when (IsTransientDatabaseIssue(exception))
+            {
+                return UpdateDrawInfoCore(request);
+            }
         }
+    }
+
+    private LotoView UpdateDrawInfoCore(DrawInfoRequest request)
+    {
+        var state = Load(useCache: false);
+        var expectedLastUpdatedAt = state.LastUpdatedAt;
+        ValidateAdmin(state, request.AdminPin);
+
+        var jackpotAmount = CleanDrawInfoText(request.JackpotAmount, 80);
+        var secondaryPrizes = CleanDrawInfoText(request.SecondaryPrizes, 120);
+        var now = LotoClock.Now;
+
+        state = state with
+        {
+            Settings = state.Settings with
+            {
+                JackpotAmount = jackpotAmount,
+                SecondaryPrizes = secondaryPrizes,
+                PrizeInfoUpdatedAt = now
+            },
+            LastUpdatedAt = now
+        };
+        Save(state, expectedLastUpdatedAt);
+        return BuildView(state);
     }
 
     public void CheckAdmin(AdminRequest request)
@@ -1097,6 +1109,27 @@ public sealed class LotoStore
         return text;
     }
 
+    private static bool IsTransientDatabaseIssue(Exception exception)
+    {
+        if (exception is LotoException)
+        {
+            return false;
+        }
+
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            var message = current.Message;
+            if (message.Contains("Exception while reading from stream", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("connection", StringComparison.OrdinalIgnoreCase) && message.Contains("closed", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private LotoView BuildView(LotoState state)
     {
         var activeParticipants = state.Participants.Where(participant => participant.Active).ToList();
@@ -1416,42 +1449,78 @@ public sealed class LotoDatabase
 
     public LotoState? Load()
     {
-        using var connection = OpenConnection();
-        EnsureSchema(connection);
-        return LoadCore(connection, null);
+        return ExecuteWithRetry(() =>
+        {
+            using var connection = OpenConnection();
+            EnsureSchema(connection);
+            return LoadCore(connection, null);
+        });
     }
 
     public LotoState? LoadLatestSnapshotWithParticipants()
     {
-        using var connection = OpenConnection();
-        EnsureSchema(connection);
+        return ExecuteWithRetry(() =>
+        {
+            using var connection = OpenConnection();
+            EnsureSchema(connection);
 
-        using var command = new NpgsqlCommand(Sql("""
+            using var command = new NpgsqlCommand(Sql("""
             SELECT payload::text
             FROM loto_state_snapshots
             ORDER BY created_at DESC, id DESC
             LIMIT 50;
             """), connection);
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            LotoState? state;
-            try
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
             {
-                state = JsonSerializer.Deserialize<LotoState>(reader.GetString(0), _snapshotOptions);
-            }
-            catch (JsonException)
-            {
-                continue;
+                LotoState? state;
+                try
+                {
+                    state = JsonSerializer.Deserialize<LotoState>(reader.GetString(0), _snapshotOptions);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (state?.Participants?.Count > 0)
+                {
+                    return state with { LastUpdatedAt = LotoClock.Now };
+                }
             }
 
-            if (state?.Participants?.Count > 0)
+            return null;
+        });
+    }
+
+    private static T ExecuteWithRetry<T>(Func<T> operation)
+    {
+        try
+        {
+            return operation();
+        }
+        catch (Exception exception) when (IsTransientStreamException(exception))
+        {
+            NpgsqlConnection.ClearAllPools();
+            System.Threading.Thread.Sleep(350);
+            return operation();
+        }
+    }
+
+    private static bool IsTransientStreamException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            var message = current.Message;
+            if (message.Contains("Exception while reading from stream", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("Timeout", StringComparison.OrdinalIgnoreCase) ||
+                message.Contains("connection", StringComparison.OrdinalIgnoreCase) && message.Contains("closed", StringComparison.OrdinalIgnoreCase))
             {
-                return state with { LastUpdatedAt = LotoClock.Now };
+                return true;
             }
         }
 
-        return null;
+        return false;
     }
 
     public void Save(LotoState state, string reason, DateTimeOffset? expectedLastUpdatedAt = null)
@@ -1951,8 +2020,8 @@ public sealed class LotoDatabase
         builder.MinPoolSize = 0;
         builder.MaxPoolSize = Math.Min(builder.MaxPoolSize, 5);
         builder.ConnectionIdleLifetime = Math.Min(builder.ConnectionIdleLifetime, 60);
-        builder.Timeout = Math.Min(builder.Timeout, 10);
-        builder.CommandTimeout = Math.Min(builder.CommandTimeout, 15);
+        builder.Timeout = Math.Max(builder.Timeout, 30);
+        builder.CommandTimeout = Math.Max(builder.CommandTimeout, 60);
         builder.KeepAlive = Math.Max(builder.KeepAlive, 30);
     }
 
