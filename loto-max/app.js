@@ -17,6 +17,9 @@ const els = {
   startupMessage: document.querySelector("#startupMessage"),
   startupProgress: document.querySelector("#startupProgress"),
   lastUpdated: document.querySelector("#lastUpdated"),
+  publicDrawDate: document.querySelector("#publicDrawDate"),
+  jackpotAmount: document.querySelector("#jackpotAmount"),
+  secondaryPrizes: document.querySelector("#secondaryPrizes"),
   nextDrawStatus: document.querySelector("#nextDrawStatus"),
   drawMeterFill: document.querySelector("#drawMeterFill"),
   drawMeterText: document.querySelector("#drawMeterText"),
@@ -33,6 +36,7 @@ const els = {
   memberDetail: document.querySelector("#memberDetail"),
   groupHistory: document.querySelector("#groupHistory"),
   form: document.querySelector("#transactionForm"),
+  drawInfoForm: document.querySelector("#drawInfoForm"),
   participantForm: document.querySelector("#participantForm"),
   transactionType: document.querySelector("#transactionType"),
   participantField: document.querySelector("#participantField"),
@@ -47,6 +51,8 @@ const els = {
   clearHistory: document.querySelector("#clearHistory"),
   toggleParticipantActive: document.querySelector("#toggleParticipantActive"),
   deleteParticipant: document.querySelector("#deleteParticipant"),
+  jackpotInput: document.querySelector("#jackpotInput"),
+  secondaryPrizesInput: document.querySelector("#secondaryPrizesInput"),
   newParticipantName: document.querySelector("#newParticipantName"),
   newParticipantBalance: document.querySelector("#newParticipantBalance"),
   newParticipantPaymentMode: document.querySelector("#newParticipantPaymentMode"),
@@ -120,6 +126,27 @@ function dateLabel(isoDate) {
     month: "long",
     year: "numeric"
   });
+}
+
+function previousDayIso(isoDate) {
+  if (!isoDate) return isoDate;
+  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setDate(date.getDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function nextDrawDateLabel() {
+  return dateLabel(state.prizeInfo?.drawDate || previousDayIso(state.nextDraw.date));
+}
+
+function nextPaymentDateLabel() {
+  return dateLabel(state.nextDraw.date);
+}
+
+function setInputValueUnlessFocused(input, value) {
+  if (!input || document.activeElement === input) return;
+  input.value = value || "";
 }
 
 function dateTimeLabel(value) {
@@ -323,7 +350,13 @@ function renderSelectors() {
 function renderMetrics() {
   const coverageRatio = state.drawTotal > 0 ? Math.min(state.groupWins / state.drawTotal, 1) : 0;
   const lastUpdated = new Date(state.lastUpdatedAt);
+  const prizeInfo = state.prizeInfo || {};
 
+  els.publicDrawDate.textContent = nextDrawDateLabel();
+  els.jackpotAmount.textContent = (prizeInfo.jackpotAmount || "").trim() || "À confirmer";
+  els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Lots additionnels à confirmer";
+  setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
+  setInputValueUnlessFocused(els.secondaryPrizesInput, prizeInfo.secondaryPrizes || "");
   els.groupWins.textContent = money(state.groupWins);
   els.winsCoverage.textContent = state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws} tirages couverts`;
   els.participantTotal.textContent = money(state.participantTotal);
@@ -336,10 +369,10 @@ function renderMetrics() {
 
   if (state.nextDraw.coveredByGains) {
     els.nextDrawStatus.textContent = "Payé par nos gains";
-    els.drawMeterText.textContent = `Le prochain paiement du ${dateLabel(state.nextDraw.date)} est couvert. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
+    els.drawMeterText.textContent = `Le tirage du ${nextDrawDateLabel()} est couvert. Le retrait passera le ${nextPaymentDateLabel()}; il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
   } else {
     els.nextDrawStatus.textContent = `${money(state.nextDraw.missingAmount)} manquant`;
-    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} pour couvrir le prochain paiement du ${dateLabel(state.nextDraw.date)}. Sinon, -${money(state.drawCostPerParticipant)} par participant.`;
+    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} pour couvrir le tirage du ${nextDrawDateLabel()}. Sinon, -${money(state.drawCostPerParticipant)} par participant au paiement du ${nextPaymentDateLabel()}.`;
   }
 }
 
@@ -550,6 +583,28 @@ async function clearHistory() {
   }
 }
 
+async function updateDrawInfo(event) {
+  event.preventDefault();
+
+  try {
+    state = await api("/api/admin/draw-info", {
+      method: "POST",
+      body: JSON.stringify({
+        jackpotAmount: els.jackpotInput.value.trim(),
+        secondaryPrizes: els.secondaryPrizesInput.value.trim(),
+        adminPin: getAdminPin()
+      })
+    });
+    render();
+    showToast("Info du gros lot mise a jour.");
+  } catch (error) {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message);
+  }
+}
+
 async function setParticipantActive() {
   try {
     const participant = state.participants.find((item) => item.id === els.manageParticipantSelect.value);
@@ -632,6 +687,7 @@ function setToday() {
 }
 
 els.form.addEventListener("submit", addTransaction);
+els.drawInfoForm.addEventListener("submit", updateDrawInfo);
 els.participantForm.addEventListener("submit", addParticipant);
 els.applyDraw.addEventListener("click", applyDraw);
 els.clearHistory.addEventListener("click", clearHistory);

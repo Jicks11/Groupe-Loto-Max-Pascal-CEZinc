@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#061226" />
     <title>Équipe B Moulage — Loto-Max CEZinc</title>
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260626-after-draw-midnight" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260628-prize-info" />
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -40,14 +40,13 @@
       <main class="dashboard">
         <section class="hero-panel" aria-labelledby="groupTitle">
           <div class="hero-copy">
-            <p class="eyebrow">Description</p>
-            <h2 id="groupTitle">Transparence total</h2>
-            <p>
-              Suivi transparent des soldes, gains, dépôts et tirages du groupe.
-              Après les tirages du mardi et du vendredi, 6$ est retiré automatiquement
-              du solde de chaque participant à minuit, quand la date passe au mercredi
-              ou au samedi. C’est plus simple, plus clair et sans place à l’erreur.
-            </p>
+            <p class="eyebrow">Prochain tirage</p>
+            <h2 id="groupTitle"><span id="publicDrawDate">Chargement...</span></h2>
+            <div class="prize-card" aria-label="Information du gros lot">
+              <span>Gros lot</span>
+              <strong id="jackpotAmount">À confirmer</strong>
+              <small id="secondaryPrizes">Lots additionnels à confirmer</small>
+            </div>
           </div>
 
           <div class="hero-card">
@@ -183,6 +182,24 @@
 
               <div class="admin-divider" aria-hidden="true"></div>
 
+              <form class="admin-form participant-admin-form" id="drawInfoForm">
+                <h3>Info du prochain tirage</h3>
+
+                <label>
+                  Gros lot
+                  <input id="jackpotInput" type="text" maxlength="80" placeholder="Ex: 10 millions" />
+                </label>
+
+                <label>
+                  Lots additionnels
+                  <input id="secondaryPrizesInput" type="text" maxlength="120" placeholder="Ex: 10 x 100 000$" />
+                </label>
+
+                <button class="accent-button" type="submit">Mettre à jour le gros lot</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
               <form class="admin-form participant-admin-form" id="participantForm">
                 <h3>Ajouter un participant</h3>
 
@@ -255,6 +272,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-max/app.js?v=20260626-after-draw-midnight" defer></script>
+    <script src="/loto-max/app.js?v=20260628-prize-info" defer></script>
   </body>
 </html>

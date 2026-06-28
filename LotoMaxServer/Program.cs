@@ -201,6 +201,22 @@ static void MapLotoApi(RouteGroupBuilder api, Func<LotoGroupRegistry, LotoStore>
         }
     });
 
+    api.MapPost("/admin/draw-info", (DrawInfoRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).UpdateDrawInfo(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant la mise a jour du tirage: {exception.Message}" });
+        }
+    });
+
     api.MapPost("/admin/check", (AdminRequest request, LotoGroupRegistry registry) =>
     {
         try
@@ -276,6 +292,7 @@ public sealed record LotoGroupConfig(
     string DefaultGroupName,
     decimal DrawCostPerParticipant,
     List<string> DeductionDays,
+    int PublicDrawDateOffsetDays,
     decimal OpeningGroupWins,
     string OpeningSource,
     List<LotoParticipantSeed> Participants)
@@ -289,6 +306,7 @@ public sealed record LotoGroupConfig(
         "Équipe B Moulage — Loto-Max CEZinc",
         6,
         new List<string> { "Wednesday", "Saturday" },
+        -1,
         96,
         "Excel",
         new List<LotoParticipantSeed>
@@ -317,6 +335,7 @@ public sealed record LotoGroupConfig(
         "Famille Taillefer - 6/49",
         5,
         new List<string> { "Wednesday", "Saturday" },
+        0,
         17,
         "Excel",
         new List<LotoParticipantSeed>
@@ -654,6 +673,33 @@ public sealed class LotoStore
         }
     }
 
+    public LotoView UpdateDrawInfo(DrawInfoRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
+            ValidateAdmin(state, request.AdminPin);
+
+            var jackpotAmount = CleanDrawInfoText(request.JackpotAmount, 80);
+            var secondaryPrizes = CleanDrawInfoText(request.SecondaryPrizes, 120);
+            var now = LotoClock.Now;
+
+            state = state with
+            {
+                Settings = state.Settings with
+                {
+                    JackpotAmount = jackpotAmount,
+                    SecondaryPrizes = secondaryPrizes,
+                    PrizeInfoUpdatedAt = now
+                },
+                LastUpdatedAt = now
+            };
+            Save(state, expectedLastUpdatedAt);
+            return BuildView(state);
+        }
+    }
+
     public void CheckAdmin(AdminRequest request)
     {
         lock (_gate)
@@ -947,6 +993,23 @@ public sealed class LotoStore
             changed = true;
         }
 
+        if (state.Settings.JackpotAmount is null ||
+            state.Settings.SecondaryPrizes is null ||
+            state.Settings.PrizeInfoUpdatedAt == default)
+        {
+            state = state with
+            {
+                Settings = state.Settings with
+                {
+                    JackpotAmount = state.Settings.JackpotAmount ?? "",
+                    SecondaryPrizes = state.Settings.SecondaryPrizes ?? "",
+                    PrizeInfoUpdatedAt = state.Settings.PrizeInfoUpdatedAt == default ? state.LastUpdatedAt : state.Settings.PrizeInfoUpdatedAt
+                },
+                LastUpdatedAt = LotoClock.Now
+            };
+            changed = true;
+        }
+
         var days = state.Settings.DeductionDays;
         var expectedDays = _config.DeductionDays;
         var alreadyExpected =
@@ -1023,6 +1086,17 @@ public sealed class LotoStore
         return parsedDays;
     }
 
+    private static string CleanDrawInfoText(string? value, int maxLength)
+    {
+        var text = (value ?? "").Trim();
+        if (text.Length > maxLength)
+        {
+            throw new LotoException($"Le texte est trop long. Maximum: {maxLength} caracteres.");
+        }
+
+        return text;
+    }
+
     private LotoView BuildView(LotoState state)
     {
         var activeParticipants = state.Participants.Where(participant => participant.Active).ToList();
@@ -1053,8 +1127,14 @@ public sealed class LotoStore
         var paidDraws = drawTotal > 0 ? (int)Math.Floor(groupWins / drawTotal) : 0;
         var winsRemainder = drawTotal > 0 ? groupWins % drawTotal : 0;
         var nextDate = NextDueDate(state, LotoClock.Today);
+        var publicDrawDate = nextDate.AddDays(_config.PublicDrawDateOffsetDays);
         var missing = Math.Max(0, drawTotal - groupWins);
         var nextDraw = new NextDrawView(nextDate, groupWins >= drawTotal, missing, winsRemainder);
+        var prizeInfo = new PrizeInfoView(
+            publicDrawDate,
+            state.Settings.JackpotAmount,
+            state.Settings.SecondaryPrizes,
+            state.Settings.PrizeInfoUpdatedAt);
 
         return new LotoView(
             state.GroupName,
@@ -1070,6 +1150,7 @@ public sealed class LotoStore
             paidDraws,
             winsRemainder,
             nextDraw,
+            prizeInfo,
             GroupHistory(state));
     }
 
@@ -1280,7 +1361,7 @@ public sealed class LotoStore
 
         return new LotoState(
             _config.DefaultGroupName,
-            new LotoSettings(_config.DrawCostPerParticipant, new List<string>(_config.DeductionDays), today, true, "2468"),
+            new LotoSettings(_config.DrawCostPerParticipant, new List<string>(_config.DeductionDays), today, true, "2468", "", "", now),
             participants,
             transactions,
             new List<AppliedDraw>(),
@@ -1405,6 +1486,9 @@ public sealed class LotoDatabase
                 automation_start_date,
                 automation_enabled,
                 admin_pin,
+                jackpot_amount,
+                secondary_prizes,
+                prize_info_updated_at,
                 last_updated_at
             )
             VALUES (
@@ -1415,6 +1499,9 @@ public sealed class LotoDatabase
                 @automation_start_date,
                 @automation_enabled,
                 @admin_pin,
+                @jackpot_amount,
+                @secondary_prizes,
+                @prize_info_updated_at,
                 @last_updated_at
             );
             """, parameters =>
@@ -1425,6 +1512,9 @@ public sealed class LotoDatabase
             parameters.AddWithValue("automation_start_date", ToDateTime(state.Settings.AutomationStartDate));
             parameters.AddWithValue("automation_enabled", state.Settings.AutomationEnabled);
             parameters.AddWithValue("admin_pin", state.Settings.AdminPin);
+            parameters.AddWithValue("jackpot_amount", state.Settings.JackpotAmount);
+            parameters.AddWithValue("secondary_prizes", state.Settings.SecondaryPrizes);
+            parameters.AddWithValue("prize_info_updated_at", state.Settings.PrizeInfoUpdatedAt.ToUniversalTime());
             parameters.AddWithValue("last_updated_at", state.LastUpdatedAt.ToUniversalTime());
         });
 
@@ -1551,6 +1641,9 @@ public sealed class LotoDatabase
                     automation_start_date date NOT NULL,
                     automation_enabled boolean NOT NULL,
                     admin_pin text NOT NULL,
+                    jackpot_amount text NOT NULL DEFAULT '',
+                    secondary_prizes text NOT NULL DEFAULT '',
+                    prize_info_updated_at timestamptz NOT NULL DEFAULT now(),
                     last_updated_at timestamptz NOT NULL
                 );
 
@@ -1604,6 +1697,9 @@ public sealed class LotoDatabase
                     ADD COLUMN IF NOT EXISTS automation_start_date date NOT NULL DEFAULT DATE '2026-06-24',
                     ADD COLUMN IF NOT EXISTS automation_enabled boolean NOT NULL DEFAULT true,
                     ADD COLUMN IF NOT EXISTS admin_pin text NOT NULL DEFAULT '2468',
+                    ADD COLUMN IF NOT EXISTS jackpot_amount text NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS secondary_prizes text NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS prize_info_updated_at timestamptz NOT NULL DEFAULT now(),
                     ADD COLUMN IF NOT EXISTS last_updated_at timestamptz NOT NULL DEFAULT now();
 
                 ALTER TABLE loto_participants
@@ -1642,6 +1738,9 @@ public sealed class LotoDatabase
                     automation_start_date = COALESCE(automation_start_date, DATE '2026-06-24'),
                     automation_enabled = COALESCE(automation_enabled, true),
                     admin_pin = COALESCE(admin_pin, '2468'),
+                    jackpot_amount = COALESCE(jackpot_amount, ''),
+                    secondary_prizes = COALESCE(secondary_prizes, ''),
+                    prize_info_updated_at = COALESCE(prize_info_updated_at, last_updated_at, now()),
                     last_updated_at = COALESCE(last_updated_at, now());
 
                 UPDATE loto_participants
@@ -1685,6 +1784,9 @@ public sealed class LotoDatabase
                 automation_start_date,
                 automation_enabled,
                 admin_pin,
+                jackpot_amount,
+                secondary_prizes,
+                prize_info_updated_at,
                 last_updated_at
             FROM loto_settings
             WHERE id = 1;
@@ -1706,11 +1808,14 @@ public sealed class LotoDatabase
                     deductionDays,
                     ToDateOnly(reader.GetDateTime(3)),
                     reader.GetBoolean(4),
-                    ReadString(reader, 5, "2468")),
+                    ReadString(reader, 5, "2468"),
+                    ReadString(reader, 6, ""),
+                    ReadString(reader, 7, ""),
+                    ToDateTimeOffset(reader.GetValue(8))),
                 new List<LotoParticipant>(),
                 new List<LotoTransaction>(),
                 new List<AppliedDraw>(),
-                ToDateTimeOffset(reader.GetValue(6)));
+                ToDateTimeOffset(reader.GetValue(9)));
         }
 
         using (var command = new NpgsqlCommand(Sql("""
@@ -1926,7 +2031,10 @@ public sealed record LotoSettings(
     List<string> DeductionDays,
     DateOnly AutomationStartDate,
     bool AutomationEnabled,
-    string AdminPin);
+    string AdminPin,
+    string JackpotAmount,
+    string SecondaryPrizes,
+    DateTimeOffset PrizeInfoUpdatedAt);
 
 public sealed record LotoParticipant(string Id, string Name, bool Active);
 
@@ -1967,6 +2075,8 @@ public sealed record ParticipantDeleteRequest(string? ParticipantId, string? Adm
 
 public sealed record DrawRequest(DateOnly? Date, string? AdminPin);
 
+public sealed record DrawInfoRequest(string? JackpotAmount, string? SecondaryPrizes, string? AdminPin);
+
 public sealed record AdminRequest(string? AdminPin);
 
 public sealed record LotoView(
@@ -1983,6 +2093,7 @@ public sealed record LotoView(
     int PaidDraws,
     decimal WinsRemainder,
     NextDrawView NextDraw,
+    PrizeInfoView PrizeInfo,
     List<HistoryEntryView> GroupHistory);
 
 public sealed record ParticipantView(
@@ -1998,3 +2109,5 @@ public sealed record ParticipantView(
 public sealed record HistoryEntryView(DateOnly Date, decimal Amount, string Title, string Meta);
 
 public sealed record NextDrawView(DateOnly Date, bool CoveredByGains, decimal MissingAmount, decimal RemainderAfterPayment);
+
+public sealed record PrizeInfoView(DateOnly DrawDate, string JackpotAmount, string SecondaryPrizes, DateTimeOffset UpdatedAt);
