@@ -77,7 +77,21 @@ app.Run();
 
 static void MapLotoApi(RouteGroupBuilder api, Func<LotoGroupRegistry, LotoStore> getStore)
 {
-    api.MapGet("/state", (LotoGroupRegistry registry) => Results.Ok(getStore(registry).GetView()));
+    api.MapGet("/state", (LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).GetView());
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant le chargement: {exception.Message}" });
+        }
+    });
 
     api.MapPost("/transactions", (TransactionRequest request, LotoGroupRegistry registry) =>
     {
@@ -274,7 +288,7 @@ public sealed record LotoGroupConfig(
         "LOTOMAX_ADMIN_PIN",
         "Équipe B Moulage — Loto-Max CEZinc",
         6,
-        new List<string> { "Tuesday", "Friday" },
+        new List<string> { "Wednesday", "Saturday" },
         96,
         "Excel",
         new List<LotoParticipantSeed>
@@ -351,11 +365,15 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
-            var changed = ProcessDueDraws(state, LotoClock.Today);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
+            var now = LotoClock.Now;
+            var today = DateOnly.FromDateTime(now.DateTime);
+            var changed = ProcessDueDraws(state, today, now.TimeOfDay);
             if (changed)
             {
-                Save(state);
+                state = state with { LastUpdatedAt = LotoClock.Now };
+                Save(state, expectedLastUpdatedAt);
             }
 
             return BuildView(state);
@@ -366,7 +384,8 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
 
             var date = request.Date ?? LotoClock.Today;
@@ -441,7 +460,7 @@ public sealed class LotoStore
             }
 
             state = state with { LastUpdatedAt = LotoClock.Now };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -450,7 +469,8 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
 
             var name = (request.Name ?? "").Trim();
@@ -481,7 +501,7 @@ public sealed class LotoStore
             }
 
             state = state with { LastUpdatedAt = LotoClock.Now };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -490,7 +510,8 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
 
             var index = state.Participants.FindIndex(participant => participant.Id == request.ParticipantId);
@@ -501,7 +522,7 @@ public sealed class LotoStore
 
             state.Participants[index] = state.Participants[index] with { Active = request.Active };
             state = state with { LastUpdatedAt = LotoClock.Now };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -510,7 +531,8 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
             var participant = FindParticipant(state, request.ParticipantId);
             var balance = ParticipantBalance(state, participant.Id);
@@ -527,7 +549,7 @@ public sealed class LotoStore
 
             state.Participants.RemoveAll(item => item.Id == participant.Id);
             state = state with { LastUpdatedAt = LotoClock.Now };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -536,12 +558,13 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
             var date = request.Date ?? NextDueDate(state, LotoClock.Today);
             ApplyDraw(state, date, "manuel");
             state = state with { LastUpdatedAt = LotoClock.Now };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -550,12 +573,13 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
             var date = request.Date ?? LotoClock.Today;
             ApplyParticipantDraw(state, date, "manuel");
             state = state with { LastUpdatedAt = LotoClock.Now };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -564,10 +588,11 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var current = Load(useCache: true);
+            var current = Load(useCache: false);
+            var expectedLastUpdatedAt = current.LastUpdatedAt;
             ValidateAdmin(current, request.AdminPin);
             var seed = SeedState();
-            Save(seed);
+            Save(seed, expectedLastUpdatedAt);
             return BuildView(seed);
         }
     }
@@ -576,7 +601,8 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
             ValidateAdmin(state, request.AdminPin);
 
             var now = LotoClock.Now;
@@ -623,7 +649,7 @@ public sealed class LotoStore
                 Transactions = transactions,
                 LastUpdatedAt = now
             };
-            Save(state);
+            Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
     }
@@ -646,17 +672,20 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: true);
-            var changed = ProcessDueDraws(state, LotoClock.Today);
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
+            var now = LotoClock.Now;
+            var today = DateOnly.FromDateTime(now.DateTime);
+            var changed = ProcessDueDraws(state, today, now.TimeOfDay);
             if (changed)
             {
                 state = state with { LastUpdatedAt = LotoClock.Now };
-                Save(state);
+                Save(state, expectedLastUpdatedAt);
             }
         }
     }
 
-    private bool ProcessDueDraws(LotoState state, DateOnly today)
+    private bool ProcessDueDraws(LotoState state, DateOnly today, TimeSpan currentTimeOfDay)
     {
         if (!state.Settings.AutomationEnabled)
         {
@@ -665,7 +694,8 @@ public sealed class LotoStore
 
         var changed = false;
         var start = state.Settings.AutomationStartDate;
-        for (var date = start; date <= today; date = date.AddDays(1))
+        var applyThrough = currentTimeOfDay < TimeSpan.FromMinutes(1) ? today.AddDays(-1) : today;
+        for (var date = start; date <= applyThrough; date = date.AddDays(1))
         {
             if (!IsDeductionDay(state, date) || IsDrawApplied(state, date))
             {
@@ -798,6 +828,11 @@ public sealed class LotoStore
             }
             catch
             {
+                if (!useCache)
+                {
+                    throw new LotoException("Impossible de charger les donnees officielles depuis Postgres. Reessaie dans quelques secondes.");
+                }
+
                 if (_cachedState is not null)
                 {
                     return _cachedState;
@@ -874,7 +909,7 @@ public sealed class LotoStore
         }
     }
 
-    private void Save(LotoState state)
+    private void Save(LotoState state, DateTimeOffset? expectedLastUpdatedAt = null)
     {
         if (state.Participants.Count == 0)
         {
@@ -883,7 +918,7 @@ public sealed class LotoStore
 
         if (_database is not null)
         {
-            _database.Save(state, "save");
+            _database.Save(state, "save", expectedLastUpdatedAt);
             CacheState(state, refreshedFromDatabase: true);
             return;
         }
@@ -902,8 +937,7 @@ public sealed class LotoStore
     private bool NormalizeState(ref LotoState state)
     {
         var changed = false;
-        if (string.Equals(_config.GroupId, "loto-649", StringComparison.OrdinalIgnoreCase) &&
-            state.Settings.DrawCostPerParticipant != _config.DrawCostPerParticipant)
+        if (state.Settings.DrawCostPerParticipant != _config.DrawCostPerParticipant)
         {
             state = state with
             {
@@ -924,21 +958,69 @@ public sealed class LotoStore
             return changed;
         }
 
-        var hasOldSchedule =
-            days.Count == 2 &&
-            days.Any(day => string.Equals(day, "Thursday", StringComparison.OrdinalIgnoreCase)) &&
-            days.Any(day => string.Equals(day, "Sunday", StringComparison.OrdinalIgnoreCase));
-
-        var shouldApplyConfiguredSchedule = hasOldSchedule || string.Equals(_config.GroupId, "loto-649", StringComparison.OrdinalIgnoreCase);
+        var shouldApplyConfiguredSchedule =
+            string.Equals(_config.GroupId, "loto-max", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_config.GroupId, "loto-649", StringComparison.OrdinalIgnoreCase);
 
         if (!shouldApplyConfiguredSchedule)
         {
             return changed;
         }
 
+        if (MirrorAppliedDrawsForShiftedSchedule(state, days, expectedDays))
+        {
+            changed = true;
+        }
+
         days.Clear();
         days.AddRange(expectedDays);
         return true;
+    }
+
+    private static bool MirrorAppliedDrawsForShiftedSchedule(LotoState state, List<string> previousDays, List<string> expectedDays)
+    {
+        var previousDaySet = ParseDays(previousDays);
+        var expectedDaySet = ParseDays(expectedDays);
+        if (previousDaySet.Count == 0 || expectedDaySet.Count == 0)
+        {
+            return false;
+        }
+
+        var changed = false;
+        var existingDates = state.AppliedDraws.Select(draw => draw.Date).ToHashSet();
+        foreach (var draw in state.AppliedDraws.ToList())
+        {
+            if (!previousDaySet.Contains(draw.Date.DayOfWeek))
+            {
+                continue;
+            }
+
+            var shiftedDate = draw.Date.AddDays(1);
+            if (!expectedDaySet.Contains(shiftedDate.DayOfWeek) || existingDates.Contains(shiftedDate))
+            {
+                continue;
+            }
+
+            state.AppliedDraws.Insert(0, draw with { Date = shiftedDate });
+            existingDates.Add(shiftedDate);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static HashSet<DayOfWeek> ParseDays(IEnumerable<string> days)
+    {
+        var parsedDays = new HashSet<DayOfWeek>();
+        foreach (var day in days)
+        {
+            if (Enum.TryParse<DayOfWeek>(day, true, out var parsed))
+            {
+                parsedDays.Add(parsed);
+            }
+        }
+
+        return parsedDays;
     }
 
     private LotoView BuildView(LotoState state)
@@ -1291,7 +1373,7 @@ public sealed class LotoDatabase
         return null;
     }
 
-    public void Save(LotoState state, string reason)
+    public void Save(LotoState state, string reason, DateTimeOffset? expectedLastUpdatedAt = null)
     {
         using var connection = OpenConnection();
         EnsureSchema(connection);
@@ -1300,6 +1382,12 @@ public sealed class LotoDatabase
         var existing = LoadCore(connection, transaction);
         if (existing is not null)
         {
+            if (expectedLastUpdatedAt is not null &&
+                existing.LastUpdatedAt.ToUniversalTime() > expectedLastUpdatedAt.Value.ToUniversalTime().AddMilliseconds(1))
+            {
+                throw new LotoException("Les donnees ont change pendant l'operation. Recharge la page et recommence pour eviter d'ecraser un depot recent.");
+            }
+
             SaveSnapshot(connection, transaction, existing, reason);
         }
 
