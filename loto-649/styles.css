@@ -308,6 +308,13 @@ small {
   font-weight: 800;
 }
 
+.prize-card .prize-share {
+  margin-top: 4px;
+  border-top: 1px solid rgba(126, 232, 255, 0.22);
+  padding-top: 8px;
+  color: #dffaff;
+}
+
 .hero-card {
   display: grid;
   align-content: center;

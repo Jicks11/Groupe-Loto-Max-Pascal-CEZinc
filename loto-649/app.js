@@ -20,6 +20,7 @@ const els = {
   publicDrawDate: document.querySelector("#publicDrawDate"),
   jackpotAmount: document.querySelector("#jackpotAmount"),
   secondaryPrizes: document.querySelector("#secondaryPrizes"),
+  prizeShareEstimate: document.querySelector("#prizeShareEstimate"),
   nextDrawStatus: document.querySelector("#nextDrawStatus"),
   drawMeterFill: document.querySelector("#drawMeterFill"),
   drawMeterText: document.querySelector("#drawMeterText"),
@@ -135,6 +136,47 @@ function publicDrawDateLabel() {
 function setInputValueUnlessFocused(input, value) {
   if (!input || document.activeElement === input) return;
   input.value = value || "";
+}
+
+function parsePrizeAmount(value) {
+  const text = String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u00a0/g, " ");
+  const match = text.match(/\d+(?:[\s.,]\d+)*/);
+  if (!match) return null;
+
+  let numberText = match[0].replace(/\s/g, "");
+  if (numberText.includes(",") && !numberText.includes(".")) {
+    numberText = numberText.replace(",", ".");
+  }
+
+  const dotCount = (numberText.match(/\./g) || []).length;
+  if (dotCount > 1 || /\.\d{3}(?:\D|$)/.test(numberText)) {
+    numberText = numberText.replace(/\./g, "");
+  }
+
+  const amount = Number(numberText);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  if (text.includes("milliard") || /\d\s*b\b/.test(text)) {
+    return amount * 1000000000;
+  }
+  if (text.includes("million") || /\d\s*m\b/.test(text)) {
+    return amount * 1000000;
+  }
+  return amount;
+}
+
+function prizeShareText(prizeText) {
+  const amount = parsePrizeAmount(prizeText);
+  const activeCount = state.participants.filter((participant) => participant.active).length;
+  if (!amount || activeCount <= 0) {
+    return "Part par participant: à confirmer";
+  }
+
+  return `Si la boule d'or est gagnée: environ ${money(amount / activeCount)} par participant actif (${activeCount} actifs)`;
 }
 
 function dateTimeLabel(value) {
@@ -342,7 +384,8 @@ function renderMetrics() {
 
   els.publicDrawDate.textContent = publicDrawDateLabel();
   els.jackpotAmount.textContent = (prizeInfo.jackpotAmount || "").trim() || "À confirmer";
-  els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Lots additionnels à confirmer";
+  els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Gros lot de base: 5 millions";
+  els.prizeShareEstimate.textContent = prizeShareText(prizeInfo.jackpotAmount);
   setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
   setInputValueUnlessFocused(els.secondaryPrizesInput, prizeInfo.secondaryPrizes || "");
   els.groupWins.textContent = money(state.groupWins);
@@ -574,23 +617,24 @@ async function clearHistory() {
 async function updateDrawInfo(event) {
   event.preventDefault();
 
-  try {
+  return withButtonBusy(event.submitter || els.drawInfoForm.querySelector("button[type='submit']"), "Sauvegarde...", async () => {
     state = await api("/api/admin/draw-info", {
       method: "POST",
       body: JSON.stringify({
         jackpotAmount: els.jackpotInput.value.trim(),
         secondaryPrizes: els.secondaryPrizesInput.value.trim(),
         adminPin: getAdminPin()
-      })
+      }),
+      timeoutMs: 45000
     });
     render();
     showToast("Info du gros lot mise a jour.");
-  } catch (error) {
+  }).catch((error) => {
     if (String(error.message).includes("PIN")) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
     }
     showToast(error.message);
-  }
+  });
 }
 
 async function setParticipantActive() {
