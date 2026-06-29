@@ -298,9 +298,11 @@ small {
 }
 
 .prize-card strong {
+  color: var(--red);
   font-size: clamp(2rem, 5vw, 3.2rem);
   line-height: 1;
   overflow-wrap: break-word;
+  text-shadow: 0 0 18px rgba(255, 93, 104, 0.24);
 }
 
 .prize-card small {
