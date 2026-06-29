@@ -68,12 +68,17 @@
 
         <section class="metrics-grid" aria-label="Resume financier">
           <article>
-            <span>nos gains</span>
+            <span>Nos gains total à ce jour</span>
             <strong id="groupWins">$0</strong>
             <small id="winsCoverage">0 tirage couvert</small>
           </article>
           <article>
-            <span>Soldes participants</span>
+            <span>R&eacute;sultat du dernier tirage</span>
+            <strong id="lastResultAmount">$0</strong>
+            <small id="lastResultMeta">Aucun r&eacute;sultat inscrit</small>
+          </article>
+          <article>
+            <span>Soldes des participants</span>
             <strong id="participantTotal">$0</strong>
             <small>Somme des comptes individuels</small>
           </article>
@@ -82,11 +87,18 @@
             <strong id="groupTotal">$0</strong>
             <small>Participants + nos gains</small>
           </article>
-          <article>
-            <span>Cout par tirage</span>
-            <strong id="drawTotal">$0</strong>
-            <small id="drawFormula">4 x 5$</small>
-          </article>
+        </section>
+
+        <section class="panel tickets-panel" aria-labelledby="ticketsTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Nos billets / num&eacute;ros</p>
+              <h2 id="ticketsTitle">Photos des billets</h2>
+            </div>
+            <span class="pill" id="ticketPhotoCount">0 photo</span>
+          </div>
+          <p id="ticketSummary">Aucune photo ajout&eacute;e pour le moment.</p>
+          <button class="accent-button compact-button" id="openTickets" type="button">Voir les billets</button>
         </section>
 
         <section class="content-grid">
@@ -205,6 +217,58 @@
 
               <div class="admin-divider" aria-hidden="true"></div>
 
+              <form class="admin-form participant-admin-form" id="drawResultForm">
+                <h3>R&eacute;sultat du dernier tirage</h3>
+
+                <div class="form-row">
+                  <label>
+                    Date du tirage
+                    <input id="resultDateInput" type="date" />
+                  </label>
+                  <label>
+                    Montant gagn&eacute;
+                    <input id="resultAmountInput" type="number" step="0.01" min="0" value="0" />
+                  </label>
+                </div>
+
+                <label>
+                  Participations gratuites
+                  <input id="resultBonusInput" type="number" step="1" min="0" value="0" />
+                </label>
+
+                <label>
+                  Note
+                  <input id="resultNoteInput" type="text" maxlength="140" placeholder="Ex: 45$ + 5 participations gratuites" />
+                </label>
+
+                <button class="accent-button" type="submit">Mettre &agrave; jour le r&eacute;sultat</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="ticketPhotoForm">
+                <h3>Ajouter une photo de billet</h3>
+
+                <label>
+                  Date du tirage
+                  <input id="ticketDateInput" type="date" />
+                </label>
+
+                <label>
+                  Photo / screenshot
+                  <input id="ticketPhotoInput" type="file" accept="image/*" multiple />
+                </label>
+
+                <label>
+                  Note
+                  <input id="ticketNoteInput" type="text" maxlength="100" placeholder="Ex: Billets achet&eacute;s chez Couche-Tard" />
+                </label>
+
+                <button class="accent-button" type="submit">Publier les billets</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
               <form class="admin-form participant-admin-form" id="participantForm">
                 <h3>Ajouter un participant</h3>
 
@@ -275,8 +339,21 @@
       </main>
     </div>
 
+    <div class="modal-overlay hidden" id="ticketsModal" role="dialog" aria-modal="true" aria-labelledby="ticketsModalTitle">
+      <div class="modal-card">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Nos billets / num&eacute;ros</p>
+            <h2 id="ticketsModalTitle">Photos des billets</h2>
+          </div>
+          <button class="ghost-button modal-close" id="closeTickets" type="button">Fermer</button>
+        </div>
+        <div class="ticket-gallery" id="ticketGallery"></div>
+      </div>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-649/app.js?v=20260628-state-load" defer></script>
+    <script src="/loto-649/app.js?v=20260629-results-tickets" defer></script>
   </body>
 </html>
