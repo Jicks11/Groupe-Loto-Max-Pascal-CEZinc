@@ -290,7 +290,7 @@ async function loadState({ silent = false } = {}) {
   }
 
   try {
-    state = await api("/api/state", { timeoutMs: 20000 });
+    state = await api("/api/state", { timeoutMs: 60000 });
     if (!selectedId || !state.participants.some((participant) => participant.id === selectedId)) {
       selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
     }

@@ -384,17 +384,7 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: false);
-            var expectedLastUpdatedAt = state.LastUpdatedAt;
-            var now = LotoClock.Now;
-            var today = DateOnly.FromDateTime(now.DateTime);
-            var changed = ProcessDueDraws(state, today, now.TimeOfDay);
-            if (changed)
-            {
-                state = state with { LastUpdatedAt = LotoClock.Now };
-                Save(state, expectedLastUpdatedAt);
-            }
-
+            var state = Load(useCache: true);
             return BuildView(state);
         }
     }
@@ -2016,7 +2006,7 @@ public sealed class LotoDatabase
 
     private static void ApplyConnectionDefaults(NpgsqlConnectionStringBuilder builder)
     {
-        builder.Pooling = true;
+        builder.Pooling = false;
         builder.MinPoolSize = 0;
         builder.MaxPoolSize = Math.Min(builder.MaxPoolSize, 5);
         builder.ConnectionIdleLifetime = Math.Min(builder.ConnectionIdleLifetime, 60);
