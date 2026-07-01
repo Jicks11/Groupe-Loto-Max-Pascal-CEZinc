@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#061226" />
     <title>Famille Taillefer - 6/49</title>
-    <link rel="stylesheet" href="/loto-649/styles.css?v=20260628-red-prize" />
+    <link rel="stylesheet" href="/loto-649/styles.css?v=20260630-admin-combined-total-safe2" />
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -145,6 +145,24 @@
             </div>
 
             <div class="admin-content hidden" id="adminContent">
+              <section class="admin-total-card" aria-label="Avoir total combin&eacute; des groupes">
+                <div>
+                  <p class="eyebrow">Vue Pascal</p>
+                  <h3>Avoir total des 2 groupes</h3>
+                </div>
+                <strong id="combinedGroupsTotal">$0</strong>
+                <div class="combined-total-breakdown">
+                  <span id="currentGroupTotalAdmin">Groupe actuel: $0</span>
+                  <span id="otherGroupTotalAdmin">Autre groupe: chargement...</span>
+                </div>
+                <div class="combined-total-actions">
+                  <button class="ghost-button" id="refreshCombinedTotal" type="button">Rafraichir le total</button>
+                  <small id="combinedTotalStatus">Visible seulement en mode admin.</small>
+                </div>
+              </section>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
               <form class="admin-form" id="transactionForm">
                 <label>
                   Action
@@ -165,7 +183,7 @@
                 <div class="form-row">
                   <label>
                     <span id="amountLabel">Montant</span>
-                    <input id="amountInput" type="number" step="0.01" value="69" required />
+                    <input id="amountInput" type="number" step="0.01" placeholder="0" required />
                   </label>
                   <label>
                     Date
@@ -354,6 +372,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-649/app.js?v=20260629-results-tickets" defer></script>
+    <script src="/loto-649/app.js?v=20260701-jackpot-glow" defer></script>
   </body>
 </html>

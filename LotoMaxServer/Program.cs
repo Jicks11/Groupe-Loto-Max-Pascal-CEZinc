@@ -382,8 +382,8 @@ public sealed record LotoGroupConfig(
         "LOTO649_ADMIN_PIN",
         "Famille Taillefer - 6/49",
         5,
-        new List<string> { "Wednesday", "Saturday" },
-        0,
+        new List<string> { "Thursday", "Sunday" },
+        -1,
         17,
         "Excel",
         new List<LotoParticipantSeed>
@@ -1309,7 +1309,7 @@ public sealed class LotoStore
     }
 
     private DateOnly PrizeDrawDate(LotoState state) =>
-        NextDueDate(state, LotoClock.Today).AddDays(_config.PublicDrawDateOffsetDays);
+        PublicDrawDate(state, LotoClock.Now);
 
     private static bool IsTransientDatabaseIssue(Exception exception)
     {
@@ -1362,7 +1362,7 @@ public sealed class LotoStore
         var paidDraws = drawTotal > 0 ? (int)Math.Floor(groupWins / drawTotal) : 0;
         var winsRemainder = drawTotal > 0 ? groupWins % drawTotal : 0;
         var nextDate = NextDueDate(state, LotoClock.Today);
-        var publicDrawDate = nextDate.AddDays(_config.PublicDrawDateOffsetDays);
+        var publicDrawDate = PublicDrawDate(state, LotoClock.Now);
         var missing = Math.Max(0, drawTotal - groupWins);
         var nextDraw = new NextDrawView(nextDate, groupWins >= drawTotal, missing, winsRemainder);
         var prizeInfo = new PrizeInfoView(
@@ -1505,6 +1505,33 @@ public sealed class LotoStore
 
     private static bool IsDeductionDay(LotoState state, DateOnly date) =>
         state.Settings.DeductionDays.Any(day => Enum.TryParse<DayOfWeek>(day, true, out var parsed) && parsed == date.DayOfWeek);
+
+    private bool IsPublicDrawDay(LotoState state, DateOnly date) =>
+        IsDeductionDay(state, date.AddDays(-_config.PublicDrawDateOffsetDays));
+
+    private DateOnly PublicDrawDate(LotoState state, DateTimeOffset now)
+    {
+        var today = DateOnly.FromDateTime(now.DateTime);
+        if (now.TimeOfDay < TimeSpan.FromMinutes(1))
+        {
+            var yesterday = today.AddDays(-1);
+            if (IsPublicDrawDay(state, yesterday))
+            {
+                return yesterday;
+            }
+        }
+
+        for (var offset = 0; offset <= 14; offset++)
+        {
+            var date = today.AddDays(offset);
+            if (IsPublicDrawDay(state, date))
+            {
+                return date;
+            }
+        }
+
+        return NextDueDate(state, today).AddDays(_config.PublicDrawDateOffsetDays);
+    }
 
     private static DateOnly NextDueDate(LotoState state, DateOnly fromDate)
     {

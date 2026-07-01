@@ -298,11 +298,42 @@ small {
 }
 
 .prize-card strong {
-  color: var(--red);
+  color: #f7fbff;
   font-size: clamp(2rem, 5vw, 3.2rem);
   line-height: 1;
   overflow-wrap: break-word;
-  text-shadow: 0 0 18px rgba(255, 93, 104, 0.24);
+  text-shadow: 0 0 16px rgba(247, 251, 255, 0.18);
+  transition: color 220ms ease, text-shadow 220ms ease;
+}
+
+.prize-card strong.jackpot-tone-white {
+  color: #f7fbff;
+  text-shadow: 0 0 16px rgba(247, 251, 255, 0.22);
+}
+
+.prize-card strong.jackpot-tone-green {
+  color: #6ff7a2;
+  text-shadow: 0 0 18px rgba(111, 247, 162, 0.38), 0 0 34px rgba(111, 247, 162, 0.14);
+}
+
+.prize-card strong.jackpot-tone-blue {
+  color: #63dfff;
+  text-shadow: 0 0 18px rgba(99, 223, 255, 0.42), 0 0 36px rgba(14, 141, 255, 0.18);
+}
+
+.prize-card strong.jackpot-tone-violet {
+  color: #b996ff;
+  text-shadow: 0 0 18px rgba(185, 150, 255, 0.44), 0 0 36px rgba(131, 78, 255, 0.2);
+}
+
+.prize-card strong.jackpot-tone-orange {
+  color: #ffb15d;
+  text-shadow: 0 0 18px rgba(255, 177, 93, 0.45), 0 0 36px rgba(255, 124, 38, 0.2);
+}
+
+.prize-card strong.jackpot-tone-rose {
+  color: #ff78d4;
+  text-shadow: 0 0 18px rgba(255, 120, 212, 0.5), 0 0 40px rgba(255, 72, 181, 0.24);
 }
 
 .prize-card small {
@@ -451,6 +482,10 @@ small {
 
 .participant-row {
   text-align: left;
+}
+
+.participant-row:nth-child(even):not(.active) {
+  background: rgba(126, 232, 255, 0.13);
 }
 
 .participant-row:hover,
@@ -619,6 +654,52 @@ small {
 .admin-contact-links em {
   color: var(--muted);
   font-style: normal;
+}
+
+.admin-total-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(126, 232, 255, 0.3);
+  border-radius: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, rgba(35, 214, 255, 0.13), rgba(14, 141, 255, 0.08)),
+    rgba(4, 16, 32, 0.42);
+  box-shadow: inset 0 0 22px rgba(35, 214, 255, 0.07);
+}
+
+.admin-total-card h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.02rem;
+}
+
+.admin-total-card > strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.combined-total-breakdown {
+  display: grid;
+  gap: 6px;
+}
+
+.combined-total-breakdown span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.combined-total-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.combined-total-actions .ghost-button {
+  width: fit-content;
+}
+
+.combined-total-actions small {
+  color: var(--muted);
 }
 
 label {
@@ -878,6 +959,7 @@ select:focus {
   .metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
 }
 
 @media (max-width: 620px) {

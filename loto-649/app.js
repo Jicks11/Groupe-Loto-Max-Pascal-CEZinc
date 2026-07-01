@@ -11,6 +11,17 @@ const API_ORIGIN = (window.LOTO_API_ORIGIN || (sameOriginApi ? "" : RENDER_API_O
 const API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
 const API_BASE = `${API_ORIGIN}${API_BASE_PATH}`;
 const ADMIN_BUTTON_LABEL = "Mode Admin r\u00e9serv\u00e9 \u00e0 Pascal";
+const CURRENT_GROUP_LABEL = APP_SCOPE === "loto-649" ? "6/49" : "Loto Max";
+const OTHER_GROUP_LABEL = APP_SCOPE === "loto-649" ? "Loto Max" : "6/49";
+const OTHER_API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api" : "/api/loto-649";
+const JACKPOT_TONE_CLASSES = [
+  "jackpot-tone-white",
+  "jackpot-tone-green",
+  "jackpot-tone-blue",
+  "jackpot-tone-violet",
+  "jackpot-tone-orange",
+  "jackpot-tone-rose"
+];
 
 function cleanLegacyBrowserCache() {
   if ("serviceWorker" in navigator && navigator.serviceWorker.getRegistrations) {
@@ -94,6 +105,11 @@ const els = {
   adminToggle: document.querySelector("#adminToggle"),
   adminLocked: document.querySelector("#adminLocked"),
   adminContent: document.querySelector("#adminContent"),
+  combinedGroupsTotal: document.querySelector("#combinedGroupsTotal"),
+  currentGroupTotalAdmin: document.querySelector("#currentGroupTotalAdmin"),
+  otherGroupTotalAdmin: document.querySelector("#otherGroupTotalAdmin"),
+  combinedTotalStatus: document.querySelector("#combinedTotalStatus"),
+  refreshCombinedTotal: document.querySelector("#refreshCombinedTotal"),
   resetDemo: document.querySelector("#resetDemo"),
   adminNote: document.querySelector("#adminNote"),
   toast: document.querySelector("#toast")
@@ -106,6 +122,9 @@ let stateLoading = false;
 let startupStartedAt = 0;
 let startupTimer = null;
 let startupRetryTimer = null;
+let otherGroupState = null;
+let combinedTotalLoading = false;
+let combinedTotalError = "";
 
 function setStartupProgress(message, percent) {
   if (els.startupMessage) {
@@ -166,6 +185,44 @@ function dateInputValue(isoDate) {
   return isoDate ? String(isoDate).slice(0, 10) : "";
 }
 
+function previousScheduledDrawIso(referenceIso, drawDays) {
+  if (!referenceIso) return "";
+  const reference = new Date(`${String(referenceIso).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(reference.getTime())) return "";
+
+  for (let offset = 1; offset <= 14; offset += 1) {
+    const date = new Date(reference);
+    date.setDate(reference.getDate() - offset);
+    if (drawDays.includes(date.getDay())) {
+      return date.toISOString().slice(0, 10);
+    }
+  }
+
+  return "";
+}
+
+function lastResultDefaultDateIso() {
+  const nextPublicDraw = state?.prizeInfo?.drawDate || state?.nextDraw?.date;
+  return previousScheduledDrawIso(nextPublicDraw, [3, 6]);
+}
+
+function resultDateForDisplay(result, prizeDrawDate) {
+  if (!result?.date) return "";
+  const resultDate = String(result.date).slice(0, 10);
+  const today = new Date();
+  const date = new Date(`${resultDate}T23:59:59`);
+  const resultDayStart = new Date(`${resultDate}T00:00:00`);
+  const resultUpdatedAt = result.updatedAt ? new Date(result.updatedAt) : null;
+  const enteredBeforeDrawDate =
+    resultUpdatedAt &&
+    !Number.isNaN(resultUpdatedAt.getTime()) &&
+    resultUpdatedAt < resultDayStart;
+  if (resultDate === String(prizeDrawDate || "").slice(0, 10) && (date > today || enteredBeforeDrawDate)) {
+    return lastResultDefaultDateIso();
+  }
+  return resultDate;
+}
+
 function publicDrawDateLabel() {
   return dateLabel(state.prizeInfo?.drawDate || state.nextDraw.date);
 }
@@ -206,6 +263,21 @@ function parsePrizeAmount(value) {
   return amount;
 }
 
+function jackpotToneClass(prizeText) {
+  const amount = parsePrizeAmount(prizeText);
+  if (!amount || amount < 15000000) return "jackpot-tone-white";
+  if (amount >= 70000000) return "jackpot-tone-rose";
+  if (amount >= 60000000) return "jackpot-tone-orange";
+  if (amount >= 50000000) return "jackpot-tone-violet";
+  if (amount >= 30000000) return "jackpot-tone-blue";
+  return "jackpot-tone-green";
+}
+
+function applyJackpotTone(prizeText) {
+  els.jackpotAmount.classList.remove(...JACKPOT_TONE_CLASSES);
+  els.jackpotAmount.classList.add(jackpotToneClass(prizeText));
+}
+
 function prizeShareText(prizeText) {
   const amount = parsePrizeAmount(prizeText);
   const activeCount = state.participants.filter((participant) => participant.active).length;
@@ -222,8 +294,9 @@ function resultMetaText(result) {
   }
 
   const parts = [];
-  if (result.date) {
-    parts.push(`Tirage du ${dateLabel(result.date)}`);
+  const displayDate = resultDateForDisplay(result, state?.prizeInfo?.drawDate);
+  if (displayDate) {
+    parts.push(`Tirage du ${dateLabel(displayDate)}`);
   }
   if (Number(result.bonusEntries || 0) > 0) {
     const count = Number(result.bonusEntries);
@@ -311,12 +384,66 @@ async function api(path, options = {}) {
   return payload;
 }
 
+async function fetchGroupState(basePath, options = {}) {
+  const { timeoutMs = API_TIMEOUT_MS } = options;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const url = `${API_ORIGIN}${basePath}/state`;
+
+  let response;
+  try {
+    response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Le serveur prend trop de temps a repondre.");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Erreur serveur.");
+  }
+  return payload;
+}
+
 async function withButtonBusy(button, label, action) {
   const previousText = button.textContent;
   button.disabled = true;
   button.textContent = label;
   try {
     return await action();
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText;
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function withButtonConfirmation(button, busyLabel, doneLabel, action) {
+  if (!button) {
+    return action();
+  }
+
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = busyLabel;
+  try {
+    const result = await action();
+    button.textContent = doneLabel;
+    await wait(700);
+    return result;
   } finally {
     button.disabled = false;
     button.textContent = previousText;
@@ -340,6 +467,9 @@ async function loadState({ silent = false } = {}) {
       selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
     }
     render();
+    if (adminUnlocked) {
+      refreshCombinedAdminTotal();
+    }
     hideStartupLoading();
   } catch (error) {
     if (!silent) {
@@ -379,6 +509,7 @@ async function unlockAdmin() {
       });
       adminUnlocked = true;
       render();
+      refreshCombinedAdminTotal();
       showToast("Mode admin active.");
     } catch (error) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
@@ -391,6 +522,53 @@ function renderAdminMode() {
   els.adminLocked.classList.toggle("hidden", adminUnlocked);
   els.adminContent.classList.toggle("hidden", !adminUnlocked);
   els.adminToggle.textContent = adminUnlocked ? "Admin actif - Pascal" : ADMIN_BUTTON_LABEL;
+  renderCombinedAdminTotal();
+}
+
+function renderCombinedAdminTotal() {
+  if (
+    !els.combinedGroupsTotal ||
+    !els.currentGroupTotalAdmin ||
+    !els.otherGroupTotalAdmin ||
+    !els.combinedTotalStatus
+  ) {
+    return;
+  }
+
+  const currentTotal = Number(state?.groupTotal || 0);
+  const otherTotal = otherGroupState ? Number(otherGroupState.groupTotal || 0) : 0;
+  els.currentGroupTotalAdmin.textContent = `${CURRENT_GROUP_LABEL}: ${money(currentTotal)}`;
+  els.otherGroupTotalAdmin.textContent = otherGroupState
+    ? `${OTHER_GROUP_LABEL}: ${money(otherTotal)}`
+    : `${OTHER_GROUP_LABEL}: ${combinedTotalLoading ? "chargement..." : "a charger"}`;
+  els.combinedGroupsTotal.textContent = money(currentTotal + otherTotal);
+
+  if (combinedTotalLoading) {
+    els.combinedTotalStatus.textContent = "Mise a jour du total combine...";
+  } else if (combinedTotalError) {
+    els.combinedTotalStatus.textContent = combinedTotalError;
+  } else if (otherGroupState) {
+    els.combinedTotalStatus.textContent = "Total combine calcule avec les 2 groupes.";
+  } else {
+    els.combinedTotalStatus.textContent = "Visible seulement en mode admin.";
+  }
+}
+
+async function refreshCombinedAdminTotal() {
+  if (!adminUnlocked || combinedTotalLoading || !els.combinedGroupsTotal) return;
+
+  combinedTotalLoading = true;
+  combinedTotalError = "";
+  renderCombinedAdminTotal();
+  try {
+    otherGroupState = await fetchGroupState(OTHER_API_BASE_PATH, { timeoutMs: 30000 });
+    renderCombinedAdminTotal();
+  } catch (error) {
+    combinedTotalError = `Impossible de charger ${OTHER_GROUP_LABEL}: ${error.message}`;
+  } finally {
+    combinedTotalLoading = false;
+    renderCombinedAdminTotal();
+  }
 }
 
 function getSelectedParticipant() {
@@ -442,6 +620,7 @@ function renderMetrics() {
 
   els.publicDrawDate.textContent = publicDrawDateLabel();
   els.jackpotAmount.textContent = (prizeInfo.jackpotAmount || "").trim() || "À confirmer";
+  applyJackpotTone(prizeInfo.jackpotAmount);
   els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Gros lot de base: 5 millions";
   els.prizeShareEstimate.textContent = prizeShareText(prizeInfo.jackpotAmount);
   setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
@@ -449,7 +628,7 @@ function renderMetrics() {
   const result = state.lastDrawResult || {};
   els.lastResultAmount.textContent = Number(result.amount || 0) > 0 ? money(result.amount) : "Aucun lot";
   els.lastResultMeta.textContent = resultMetaText(result);
-  setInputValueUnlessFocused(els.resultDateInput, dateInputValue(result.date || prizeInfo.drawDate));
+  setInputValueUnlessFocused(els.resultDateInput, dateInputValue(result.date || lastResultDefaultDateIso()));
   setInputValueUnlessFocused(els.resultAmountInput, String(result.amount || 0));
   setInputValueUnlessFocused(els.resultBonusInput, String(result.bonusEntries || 0));
   setInputValueUnlessFocused(els.resultNoteInput, result.note || "");
@@ -470,10 +649,10 @@ function renderMetrics() {
 
   if (state.nextDraw.coveredByGains) {
     els.nextDrawStatus.textContent = "Payé par nos gains";
-    els.drawMeterText.textContent = `Le prochain tirage du ${dateLabel(state.nextDraw.date)} est couvert. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
+    els.drawMeterText.textContent = `Le prochain paiement automatique est couvert par nos gains. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
   } else {
     els.nextDrawStatus.textContent = `${money(state.nextDraw.missingAmount)} manquant`;
-    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} pour couvrir le prochain tirage du ${dateLabel(state.nextDraw.date)}. Sinon, -${money(state.drawCostPerParticipant)} par participant.`;
+    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} dans nos gains pour couvrir le prochain paiement automatique. Si nos gains ne suffisent pas, un retrait de ${money(state.drawCostPerParticipant)} par participant sera appliqué.`;
   }
 }
 
@@ -597,36 +776,44 @@ function renderHistoryRow(entry) {
 async function addTransaction(event) {
   event.preventDefault();
 
-  try {
-    const body = {
-      type: els.transactionType.value,
-      participantId: els.transactionType.value === "gain" ? null : els.participantSelect.value,
-      amount: Number(els.amountInput.value),
-      date: els.dateInput.value,
-      paymentMode: els.paymentMode.value,
-      note: els.noteInput.value.trim(),
-      adminPin: getAdminPin()
-    };
+  return withButtonConfirmation(
+    event.submitter || els.form.querySelector("button[type='submit']"),
+    "Enregistrement...",
+    "Enregistre",
+    async () => {
+      try {
+        const body = {
+          type: els.transactionType.value,
+          participantId: els.transactionType.value === "gain" ? null : els.participantSelect.value,
+          amount: Number(els.amountInput.value),
+          date: els.dateInput.value,
+          paymentMode: els.paymentMode.value,
+          note: els.noteInput.value.trim(),
+          adminPin: getAdminPin()
+        };
 
-    state = await api("/api/transactions", {
-      method: "POST",
-      body: JSON.stringify(body)
-    });
+        state = await api("/api/transactions", {
+          method: "POST",
+          body: JSON.stringify(body)
+        });
 
-    if (body.participantId) {
-      selectedId = body.participantId;
-      localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
+        if (body.participantId) {
+          selectedId = body.participantId;
+          localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
+        }
+
+        els.noteInput.value = "";
+        render();
+        showToast("Transaction enregistree.");
+      } catch (error) {
+        if (String(error.message).includes("PIN")) {
+          sessionStorage.removeItem(ADMIN_PIN_KEY);
+        }
+        showToast(error.message);
+        throw error;
+      }
     }
-
-    els.noteInput.value = "";
-    render();
-    showToast("Transaction enregistree.");
-  } catch (error) {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message);
-  }
+  ).catch(() => {});
 }
 
 async function applyDraw() {
@@ -939,6 +1126,8 @@ els.clearHistory.addEventListener("click", clearHistory);
 els.toggleParticipantActive.addEventListener("click", setParticipantActive);
 els.deleteParticipant.addEventListener("click", deleteParticipant);
 els.adminToggle.addEventListener("click", unlockAdmin);
+els.refreshCombinedTotal?.addEventListener("click", () =>
+  withButtonBusy(els.refreshCombinedTotal, "Calcul...", refreshCombinedAdminTotal));
 els.transactionType.addEventListener("change", renderSelectors);
 els.resetDemo.addEventListener("click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
 els.openTickets.addEventListener("click", () => els.ticketsModal.classList.remove("hidden"));

@@ -1,371 +1,373 @@
-const SELECTED_MEMBER_KEY = "equipe-b-loto-selected-member";
-const ADMIN_PIN_KEY = "equipe-b-loto-admin-pin";
-const REFRESH_INTERVAL_MS = 10000;
-
-const els = {
-  lastUpdated: document.querySelector("#lastUpdated"),
-  nextDrawStatus: document.querySelector("#nextDrawStatus"),
-  drawMeterFill: document.querySelector("#drawMeterFill"),
-  drawMeterText: document.querySelector("#drawMeterText"),
-  groupWins: document.querySelector("#groupWins"),
-  winsCoverage: document.querySelector("#winsCoverage"),
-  participantTotal: document.querySelector("#participantTotal"),
-  groupTotal: document.querySelector("#groupTotal"),
-  drawTotal: document.querySelector("#drawTotal"),
-  drawFormula: document.querySelector("#drawFormula"),
-  activeCount: document.querySelector("#activeCount"),
-  participantList: document.querySelector("#participantList"),
-  detailTitle: document.querySelector("#detailTitle"),
-  detailStatus: document.querySelector("#detailStatus"),
-  memberDetail: document.querySelector("#memberDetail"),
-  groupHistory: document.querySelector("#groupHistory"),
-  form: document.querySelector("#transactionForm"),
-  transactionType: document.querySelector("#transactionType"),
-  participantField: document.querySelector("#participantField"),
-  participantSelect: document.querySelector("#participantSelect"),
-  amountInput: document.querySelector("#amountInput"),
-  dateInput: document.querySelector("#dateInput"),
-  paymentMode: document.querySelector("#paymentMode"),
-  noteInput: document.querySelector("#noteInput"),
-  applyDraw: document.querySelector("#applyDraw"),
-  adminToggle: document.querySelector("#adminToggle"),
-  adminLocked: document.querySelector("#adminLocked"),
-  adminContent: document.querySelector("#adminContent"),
-  resetDemo: document.querySelector("#resetDemo"),
-  adminNote: document.querySelector("#adminNote"),
-  toast: document.querySelector("#toast")
-};
-
-let state = null;
-let selectedId = localStorage.getItem(SELECTED_MEMBER_KEY);
-let adminUnlocked = false;
-
-function money(value) {
-  return new Intl.NumberFormat("fr-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0
-  }).format(Number(value || 0));
-}
-
-function dateLabel(isoDate) {
-  if (!isoDate) return "Date inconnue";
-  return new Date(`${String(isoDate).slice(0, 10)}T12:00:00`).toLocaleDateString("fr-CA", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-}
-
-function dateTimeLabel(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Dernière mise à jour: inconnue";
-  }
-
-  const datePart = date.toLocaleDateString("fr-CA", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-  const timePart = date.toLocaleTimeString("fr-CA", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-
-  return `Dernière mise à jour: ${datePart} à ${timePart}`;
-}
-
-function signedMoney(value) {
-  const amount = Number(value || 0);
-  return amount > 0 ? `+${money(amount)}` : money(amount);
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    ...options
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || "Erreur serveur.");
-  }
-  return payload;
-}
-
-async function loadState({ silent = false } = {}) {
-  try {
-    state = await api("/api/state");
-    if (!selectedId || !state.participants.some((participant) => participant.id === selectedId)) {
-      selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
-    }
-    render();
-  } catch (error) {
-    if (!silent) {
-      showToast(`Impossible de charger les donnees: ${error.message}`);
-    }
-  }
-}
-
-function getAdminPin() {
-  const saved = sessionStorage.getItem(ADMIN_PIN_KEY);
-  if (saved) return saved;
-
-  const entered = window.prompt("PIN admin");
-  if (!entered) {
-    throw new Error("Action annulee.");
-  }
-
-  sessionStorage.setItem(ADMIN_PIN_KEY, entered);
-  return entered;
-}
-
-async function unlockAdmin() {
-  try {
-    const pin = getAdminPin();
-    await api("/api/admin/check", {
-      method: "POST",
-      body: JSON.stringify({ adminPin: pin })
-    });
-    adminUnlocked = true;
-    renderAdminMode();
-    showToast("Mode admin active.");
-  } catch (error) {
-    sessionStorage.removeItem(ADMIN_PIN_KEY);
-    showToast(error.message);
-  }
-}
-
-function renderAdminMode() {
-  els.adminLocked.classList.toggle("hidden", adminUnlocked);
-  els.adminContent.classList.toggle("hidden", !adminUnlocked);
-  els.adminToggle.textContent = adminUnlocked ? "Admin actif" : "Mode admin";
-}
-
-function getSelectedParticipant() {
-  return state?.participants.find((participant) => participant.id === selectedId) || state?.participants[0];
-}
-
-function render() {
-  if (!state) return;
-  renderSelectors();
-  renderMetrics();
-  renderParticipants();
-  renderMemberDetail();
-  renderGroupHistory();
-  renderAdminMode();
-}
-
-function renderSelectors() {
-  const currentValue = els.participantSelect.value || selectedId;
-  els.participantSelect.innerHTML = state.participants
-    .map((participant) => `<option value="${escapeHtml(participant.id)}">${escapeHtml(participant.name)}</option>`)
-    .join("");
-  els.participantSelect.value = currentValue;
-
-  const isGroupGain = els.transactionType.value === "gain";
-  els.participantField.style.display = isGroupGain ? "none" : "grid";
-  if (isGroupGain) {
-    els.paymentMode.value = "Billet gratuit";
-  }
-}
-
-function renderMetrics() {
-  const coverageRatio = state.drawTotal > 0 ? Math.min(state.groupWins / state.drawTotal, 1) : 0;
-  const lastUpdated = new Date(state.lastUpdatedAt);
-
-  els.groupWins.textContent = money(state.groupWins);
-  els.winsCoverage.textContent = state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws} tirages couverts`;
-  els.participantTotal.textContent = money(state.participantTotal);
-  els.groupTotal.textContent = money(state.groupTotal);
-  els.drawTotal.textContent = money(state.drawTotal);
-  els.drawFormula.textContent = `${state.participants.filter((participant) => participant.active).length} x ${money(state.drawCostPerParticipant)}`;
-  els.activeCount.textContent = `${state.participants.filter((participant) => participant.active).length} actifs`;
-  els.lastUpdated.textContent = dateTimeLabel(lastUpdated);
-  els.drawMeterFill.style.width = `${Math.round(coverageRatio * 100)}%`;
-
-  if (state.nextDraw.coveredByGains) {
-    els.nextDrawStatus.textContent = "Paye par Nos gains";
-    els.drawMeterText.textContent = `Le prochain tirage du ${dateLabel(state.nextDraw.date)} est couvert. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans Nos gains.`;
-  } else {
-    els.nextDrawStatus.textContent = `${money(state.nextDraw.missingAmount)} manquant`;
-    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} pour couvrir le prochain tirage du ${dateLabel(state.nextDraw.date)}. Sinon, -${money(state.drawCostPerParticipant)} par participant.`;
-  }
-}
-
-function renderParticipants() {
-  els.participantList.innerHTML = state.participants
-    .map((participant) => {
-      const className = participant.balance < 0 ? "negative" : "positive";
-      const active = participant.id === selectedId ? " active" : "";
-      const meta = participant.balance < 0 ? "A rattraper" : "Solde disponible";
-      return `
-        <button class="participant-row${active}" type="button" data-participant="${escapeHtml(participant.id)}">
-          <span>
-            <span class="participant-name">${escapeHtml(participant.name)}</span>
-            <span class="participant-meta">${meta}</span>
-          </span>
-          <span class="money ${className}">${money(participant.balance)}</span>
-        </button>
-      `;
-    })
-    .join("");
-
-  els.participantList.querySelectorAll("[data-participant]").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedId = button.dataset.participant;
-      localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
-      render();
-    });
-  });
-}
-
-function renderMemberDetail() {
-  const participant = getSelectedParticipant();
-  if (!participant) return;
-
-  const status = participant.balance < 0 ? "Negatif" : "Actif";
-  const className = participant.balance < 0 ? "negative" : "positive";
-
-  els.detailTitle.textContent = participant.name;
-  els.detailStatus.textContent = status;
-  els.memberDetail.innerHTML = `
-    <div class="detail-top">
-      <div>
-        <h3>${escapeHtml(participant.name)}</h3>
-        <p>Information detaillee visible quand on clique sur son nom.</p>
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#061226" />
+    <title>Équipe B Moulage — Loto-Max CEZinc</title>
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260630-admin-combined-total-safe2" />
+  </head>
+  <body>
+    <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
+      <div class="startup-card">
+        <div class="startup-logo">Loto</div>
+        <p class="eyebrow">Connexion au groupe</p>
+        <h2>Chargement des soldes</h2>
+        <p id="startupMessage">On pr&eacute;pare les donn&eacute;es du groupe.</p>
+        <div class="startup-progress" aria-hidden="true">
+          <span id="startupProgress"></span>
+        </div>
       </div>
-      <strong class="money ${className}">${money(participant.balance)}</strong>
     </div>
 
-    <div class="coverage-grid">
-      <article>
-        <span>Solde actuel</span>
-        <strong>${money(participant.balance)}</strong>
-      </article>
-      <article>
-        <span>Couvre</span>
-        <strong>${participant.coveredDraws} tirages</strong>
-      </article>
-      <article>
-        <span>Reste apres</span>
-        <strong>${money(participant.remainder)}</strong>
-      </article>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="logo-card">
+            <img class="official-logo" src="https://www.lottomax.ca/assets/logo_en.png" alt="Lotto Max" />
+          </div>
+          <div>
+            <p class="eyebrow">Groupe prive non officiel</p>
+            <h1>Équipe B Moulage — Loto-Max CEZinc</h1>
+          </div>
+        </div>
+
+        <div class="status-strip" aria-label="Derniere mise a jour du groupe">
+          <span id="lastUpdated">Derniere mise a jour: chargement...</span>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="hero-panel" aria-labelledby="groupTitle">
+          <div class="hero-copy">
+            <p class="eyebrow">Prochain tirage</p>
+            <h2 id="groupTitle"><span id="publicDrawDate">Chargement...</span></h2>
+            <div class="prize-card" aria-label="Information du gros lot">
+              <span>Gros lot</span>
+              <strong id="jackpotAmount">À confirmer</strong>
+              <small id="secondaryPrizes">Lots additionnels à confirmer</small>
+              <small class="prize-share" id="prizeShareEstimate">Part par participant: à confirmer</small>
+            </div>
+          </div>
+
+          <div class="hero-card">
+            <div>
+              <span>Prochain paiement</span>
+              <strong id="nextDrawStatus">Calcule automatiquement</strong>
+            </div>
+            <div class="draw-meter" aria-hidden="true">
+              <span id="drawMeterFill"></span>
+            </div>
+            <p id="drawMeterText">Chargement...</p>
+          </div>
+        </section>
+
+        <section class="metrics-grid" aria-label="Resume financier">
+          <article>
+            <span>Nos gains total à ce jour</span>
+            <strong id="groupWins">$0</strong>
+            <small id="winsCoverage">0 tirage couvert</small>
+          </article>
+          <article>
+            <span>R&eacute;sultat du dernier tirage</span>
+            <strong id="lastResultAmount">$0</strong>
+            <small id="lastResultMeta">Aucun r&eacute;sultat inscrit</small>
+          </article>
+          <article>
+            <span>Soldes des participants</span>
+            <strong id="participantTotal">$0</strong>
+            <small>Somme des comptes individuels</small>
+          </article>
+          <article>
+            <span>Avoir total du groupe</span>
+            <strong id="groupTotal">$0</strong>
+            <small>Participants + nos gains</small>
+          </article>
+        </section>
+
+        <section class="panel tickets-panel" aria-labelledby="ticketsTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Nos billets / num&eacute;ros</p>
+              <h2 id="ticketsTitle">Photos des billets</h2>
+            </div>
+            <span class="pill" id="ticketPhotoCount">0 photo</span>
+          </div>
+          <p id="ticketSummary">Aucune photo ajout&eacute;e pour le moment.</p>
+          <button class="accent-button compact-button" id="openTickets" type="button">Voir les billets</button>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel participant-panel" aria-labelledby="participantsTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Vue publique</p>
+                <h2 id="participantsTitle">Participants</h2>
+              </div>
+              <span class="pill" id="activeCount">13 actifs</span>
+            </div>
+            <div class="participant-list" id="participantList"></div>
+          </article>
+
+          <article class="panel detail-panel" aria-labelledby="detailTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Détails participant</p>
+                <h2 id="detailTitle">Participant</h2>
+              </div>
+              <span class="pill" id="detailStatus">Solde</span>
+            </div>
+            <div id="memberDetail" class="member-detail"></div>
+          </article>
+        </section>
+
+        <section class="content-grid lower-grid">
+          <article class="panel admin-panel" aria-labelledby="adminTitle">
+            <div class="panel-heading admin-heading">
+              <div>
+                <p class="eyebrow">Administrateur</p>
+                <h2 id="adminTitle">Pascal Taillefer</h2>
+              </div>
+              <button class="ghost-button admin-reserved-button" id="adminToggle" type="button">Mode Admin r&eacute;serv&eacute; &agrave; Pascal</button>
+            </div>
+
+            <div class="admin-locked admin-contact-card" id="adminLocked">
+              <p>Pour les virements Interac</p>
+              <div class="admin-contact-links">
+                <a href="mailto:pascal_taillefer@hotmail.com">pascal_taillefer@hotmail.com</a>
+                <em>ou</em>
+                <a href="tel:+14503749930">450 374-9930</a>
+              </div>
+            </div>
+
+            <div class="admin-content hidden" id="adminContent">
+              <section class="admin-total-card" aria-label="Avoir total combin&eacute; des groupes">
+                <div>
+                  <p class="eyebrow">Vue Pascal</p>
+                  <h3>Avoir total des 2 groupes</h3>
+                </div>
+                <strong id="combinedGroupsTotal">$0</strong>
+                <div class="combined-total-breakdown">
+                  <span id="currentGroupTotalAdmin">Groupe actuel: $0</span>
+                  <span id="otherGroupTotalAdmin">Autre groupe: chargement...</span>
+                </div>
+                <div class="combined-total-actions">
+                  <button class="ghost-button" id="refreshCombinedTotal" type="button">Rafraichir le total</button>
+                  <small id="combinedTotalStatus">Visible seulement en mode admin.</small>
+                </div>
+              </section>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form" id="transactionForm">
+                <label>
+                  Action
+                  <select id="transactionType">
+                    <option value="deposit">Depot participant</option>
+                    <option value="withdrawal">Retrait / trop-perçu</option>
+                    <option value="gain">Gain du groupe</option>
+                    <option value="correction">Correction participant</option>
+                    <option value="set_balance">Modifier solde exact</option>
+                  </select>
+                </label>
+
+                <label id="participantField">
+                  Participant
+                  <select id="participantSelect"></select>
+                </label>
+
+                <div class="form-row">
+                  <label>
+                    <span id="amountLabel">Montant</span>
+                    <input id="amountInput" type="number" step="0.01" placeholder="0" required />
+                  </label>
+                  <label>
+                    Date
+                    <input id="dateInput" type="date" required />
+                  </label>
+                </div>
+
+                <label>
+                  Mode de paiement
+                  <select id="paymentMode">
+                    <option value="Interac">Interac</option>
+                    <option value="Comptant">Comptant</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Credit manuel">Credit manuel</option>
+                    <option value="Billet gratuit">Billet gratuit</option>
+                    <option value="Correction">Correction</option>
+                    <option value="Trop-perçu">Trop-perçu</option>
+                  </select>
+                </label>
+
+                <label>
+                  Note
+                  <input id="noteInput" type="text" maxlength="80" placeholder="Optionnel" />
+                </label>
+
+                <div class="button-row">
+                  <button class="primary-button" type="submit">Enregistrer</button>
+                  <button class="accent-button" id="applyDraw" type="button">Retirer tirage aux actifs</button>
+                </div>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="drawInfoForm">
+                <h3>Info du prochain tirage</h3>
+
+                <label>
+                  Gros lot
+                  <input id="jackpotInput" type="text" maxlength="80" placeholder="Ex: 10 millions" />
+                </label>
+
+                <label>
+                  Lots additionnels
+                  <input id="secondaryPrizesInput" type="text" maxlength="120" placeholder="Ex: 10 x 100 000$" />
+                </label>
+
+                <button class="accent-button" type="submit">Mettre à jour le gros lot</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="drawResultForm">
+                <h3>R&eacute;sultat du dernier tirage</h3>
+
+                <div class="form-row">
+                  <label>
+                    Date du tirage
+                    <input id="resultDateInput" type="date" />
+                  </label>
+                  <label>
+                    Montant gagn&eacute;
+                    <input id="resultAmountInput" type="number" step="0.01" min="0" value="0" />
+                  </label>
+                </div>
+
+                <label>
+                  Participations gratuites
+                  <input id="resultBonusInput" type="number" step="1" min="0" value="0" />
+                </label>
+
+                <label>
+                  Note
+                  <input id="resultNoteInput" type="text" maxlength="140" placeholder="Ex: 45$ + 5 participations gratuites" />
+                </label>
+
+                <button class="accent-button" type="submit">Mettre &agrave; jour le r&eacute;sultat</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="ticketPhotoForm">
+                <h3>Ajouter une photo de billet</h3>
+
+                <label>
+                  Date du tirage
+                  <input id="ticketDateInput" type="date" />
+                </label>
+
+                <label>
+                  Photo / screenshot
+                  <input id="ticketPhotoInput" type="file" accept="image/*" multiple />
+                </label>
+
+                <label>
+                  Note
+                  <input id="ticketNoteInput" type="text" maxlength="100" placeholder="Ex: Billets achet&eacute;s chez Couche-Tard" />
+                </label>
+
+                <button class="accent-button" type="submit">Publier les billets</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="participantForm">
+                <h3>Ajouter un participant</h3>
+
+                <label>
+                  Nom complet
+                  <input id="newParticipantName" type="text" maxlength="80" placeholder="Ex: Nouveau participant" />
+                </label>
+
+                <div class="form-row">
+                  <label>
+                    Solde initial
+                    <input id="newParticipantBalance" type="number" step="0.01" value="0" />
+                  </label>
+                  <label>
+                    Mode
+                    <select id="newParticipantPaymentMode">
+                      <option value="Interac">Interac</option>
+                      <option value="Comptant">Comptant</option>
+                      <option value="Cheque">Cheque</option>
+                      <option value="Credit manuel">Credit manuel</option>
+                      <option value="Correction">Correction</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label class="checkbox-line">
+                  <input id="newParticipantActive" type="checkbox" checked />
+                  Actif pour les prochains tirages
+                </label>
+
+                <button class="accent-button" type="submit">Ajouter participant</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form participant-admin-form" id="participantManageForm">
+                <h3>Gérer un participant</h3>
+
+                <label>
+                  Participant
+                  <select id="manageParticipantSelect"></select>
+                </label>
+
+                <div class="button-row">
+                  <button class="accent-button" id="toggleParticipantActive" type="button">Activer / désactiver</button>
+                  <button class="danger-button" id="deleteParticipant" type="button">Supprimer</button>
+                </div>
+              </form>
+
+              <button class="ghost-button full-button" id="resetDemo" type="button">Rafraichir</button>
+              <button class="danger-button full-button" id="clearHistory" type="button">Nettoyer l'historique</button>
+            </div>
+
+            <p class="admin-note hidden" id="adminNote"></p>
+          </article>
+
+          <article class="panel history-panel" aria-labelledby="historyTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Audit public</p>
+                <h2 id="historyTitle">Historique du groupe</h2>
+              </div>
+              <span class="pill">Live</span>
+            </div>
+            <div class="history-list" id="groupHistory"></div>
+          </article>
+        </section>
+      </main>
     </div>
 
-    <p class="detail-subtitle">Historique avec dates</p>
-    <div class="history-list">
-      ${participant.history.map(renderHistoryRow).join("")}
+    <div class="modal-overlay hidden" id="ticketsModal" role="dialog" aria-modal="true" aria-labelledby="ticketsModalTitle">
+      <div class="modal-card">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Nos billets / num&eacute;ros</p>
+            <h2 id="ticketsModalTitle">Photos des billets</h2>
+          </div>
+          <button class="ghost-button modal-close" id="closeTickets" type="button">Fermer</button>
+        </div>
+        <div class="ticket-gallery" id="ticketGallery"></div>
+      </div>
     </div>
-  `;
-}
 
-function renderGroupHistory() {
-  els.groupHistory.innerHTML = state.groupHistory.map(renderHistoryRow).join("");
-}
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-function renderHistoryRow(entry) {
-  return `
-    <div class="history-row">
-      <span>
-        <span class="history-title">${escapeHtml(entry.title)}</span>
-        <span class="history-meta">${dateLabel(entry.date)} - ${escapeHtml(entry.meta)}</span>
-      </span>
-      <span class="money ${entry.amount < 0 ? "negative" : "positive"}">${signedMoney(entry.amount)}</span>
-    </div>
-  `;
-}
-
-async function addTransaction(event) {
-  event.preventDefault();
-
-  try {
-    const body = {
-      type: els.transactionType.value,
-      participantId: els.transactionType.value === "gain" ? null : els.participantSelect.value,
-      amount: Number(els.amountInput.value),
-      date: els.dateInput.value,
-      paymentMode: els.paymentMode.value,
-      note: els.noteInput.value.trim(),
-      adminPin: getAdminPin()
-    };
-
-    state = await api("/api/transactions", {
-      method: "POST",
-      body: JSON.stringify(body)
-    });
-
-    if (body.participantId) {
-      selectedId = body.participantId;
-      localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
-    }
-
-    els.noteInput.value = "";
-    render();
-    showToast("Transaction enregistree.");
-  } catch (error) {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message);
-  }
-}
-
-async function applyDraw() {
-  try {
-    const confirmed = window.confirm(`Appliquer le prochain tirage du ${dateLabel(state.nextDraw.date)}?`);
-    if (!confirmed) return;
-
-    state = await api("/api/draws/apply", {
-      method: "POST",
-      body: JSON.stringify({ adminPin: getAdminPin() })
-    });
-    render();
-    showToast("Tirage applique.");
-  } catch (error) {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message);
-  }
-}
-
-function showToast(message) {
-  els.toast.textContent = message;
-  els.toast.classList.add("show");
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    els.toast.classList.remove("show");
-  }, 3000);
-}
-
-function setToday() {
-  const today = new Date();
-  const offset = today.getTimezoneOffset() * 60000;
-  els.dateInput.value = new Date(today.getTime() - offset).toISOString().slice(0, 10);
-}
-
-els.form.addEventListener("submit", addTransaction);
-els.applyDraw.addEventListener("click", applyDraw);
-els.adminToggle.addEventListener("click", unlockAdmin);
-els.transactionType.addEventListener("change", renderSelectors);
-els.resetDemo.addEventListener("click", () => loadState());
-
-els.resetDemo.textContent = "Rafraichir";
-els.adminNote.textContent = "Les participants voient tout en lecture seule. Les actions admin demandent le PIN.";
-
-setToday();
-loadState();
-window.setInterval(() => loadState({ silent: true }), REFRESH_INTERVAL_MS);
+    <script src="/loto-max/app.js?v=20260701-lotomax-90m-glow" defer></script>
+  </body>
+</html>
