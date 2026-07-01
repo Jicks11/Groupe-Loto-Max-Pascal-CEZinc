@@ -65,6 +65,11 @@ const els = {
   closeTickets: document.querySelector("#closeTickets"),
   ticketsModal: document.querySelector("#ticketsModal"),
   ticketGallery: document.querySelector("#ticketGallery"),
+  resultPhotoSummary: document.querySelector("#resultPhotoSummary"),
+  openResultPhotos: document.querySelector("#openResultPhotos"),
+  closeResultPhotos: document.querySelector("#closeResultPhotos"),
+  resultPhotosModal: document.querySelector("#resultPhotosModal"),
+  resultPhotoGallery: document.querySelector("#resultPhotoGallery"),
   activeCount: document.querySelector("#activeCount"),
   participantList: document.querySelector("#participantList"),
   detailTitle: document.querySelector("#detailTitle"),
@@ -74,6 +79,7 @@ const els = {
   form: document.querySelector("#transactionForm"),
   drawInfoForm: document.querySelector("#drawInfoForm"),
   drawResultForm: document.querySelector("#drawResultForm"),
+  resultPhotoForm: document.querySelector("#resultPhotoForm"),
   ticketPhotoForm: document.querySelector("#ticketPhotoForm"),
   participantForm: document.querySelector("#participantForm"),
   transactionType: document.querySelector("#transactionType"),
@@ -95,6 +101,9 @@ const els = {
   resultAmountInput: document.querySelector("#resultAmountInput"),
   resultBonusInput: document.querySelector("#resultBonusInput"),
   resultNoteInput: document.querySelector("#resultNoteInput"),
+  resultPhotoDateInput: document.querySelector("#resultPhotoDateInput"),
+  resultPhotoInput: document.querySelector("#resultPhotoInput"),
+  resultPhotoNoteInput: document.querySelector("#resultPhotoNoteInput"),
   ticketDateInput: document.querySelector("#ticketDateInput"),
   ticketPhotoInput: document.querySelector("#ticketPhotoInput"),
   ticketNoteInput: document.querySelector("#ticketNoteInput"),
@@ -594,6 +603,7 @@ function render() {
   renderParticipants();
   renderMemberDetail();
   renderGroupHistory();
+  renderResultPhotos();
   renderTickets();
   renderAdminMode();
 }
@@ -638,12 +648,11 @@ function renderMetrics() {
   setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
   setInputValueUnlessFocused(els.secondaryPrizesInput, prizeInfo.secondaryPrizes || "");
   const result = state.lastDrawResult || {};
-  els.lastResultAmount.textContent = Number(result.amount || 0) > 0 ? money(result.amount) : "Aucun lot";
-  els.lastResultMeta.textContent = resultMetaText(result);
   setInputValueUnlessFocused(els.resultDateInput, dateInputValue(result.date || lastResultDefaultDateIso()));
   setInputValueUnlessFocused(els.resultAmountInput, String(result.amount || 0));
   setInputValueUnlessFocused(els.resultBonusInput, String(result.bonusEntries || 0));
   setInputValueUnlessFocused(els.resultNoteInput, result.note || "");
+  setInputValueUnlessFocused(els.resultPhotoDateInput, dateInputValue(result.date || lastResultDefaultDateIso()));
   setInputValueUnlessFocused(els.ticketDateInput, dateInputValue(prizeInfo.drawDate));
   els.groupWins.textContent = money(state.groupWins);
   els.winsCoverage.textContent = state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws} tirages couverts`;
@@ -739,6 +748,37 @@ function renderMemberDetail() {
 
 function renderGroupHistory() {
   els.groupHistory.innerHTML = state.groupHistory.map(renderHistoryRow).join("");
+}
+
+function renderResultPhotos() {
+  const photos = state.resultPhotos || [];
+  const latestDate = photos[0]?.date || state.lastDrawResult?.date;
+  els.resultPhotoSummary.textContent = photos.length
+    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat${latestDate ? ` du ${dateLabel(latestDate)}` : ""}.`
+    : "Aucune photo de résultat ajoutée pour le moment.";
+  els.openResultPhotos.disabled = photos.length === 0;
+  els.resultPhotoGallery.innerHTML = photos.length
+    ? photos.map(renderResultPhoto).join("")
+    : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
+
+  els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
+    button.addEventListener("click", () => deleteResultPhoto(button.dataset.deleteResult));
+  });
+}
+
+function renderResultPhoto(photo) {
+  return `
+    <article class="ticket-card">
+      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>
+      <div>
+        <strong>${dateLabel(photo.date)}</strong>
+        <small>${escapeHtml(photo.note || "Résultat du dernier tirage")}</small>
+      </div>
+      ${adminUnlocked ? `<button class="danger-button compact-button" type="button" data-delete-result="${escapeHtml(photo.id)}">Supprimer</button>` : ""}
+    </article>
+  `;
 }
 
 function renderTickets() {
@@ -963,6 +1003,41 @@ async function updateDrawResult(event) {
   });
 }
 
+async function uploadResultPhotos(event) {
+  event.preventDefault();
+  const files = Array.from(els.resultPhotoInput.files || []);
+  if (files.length === 0) {
+    showToast("Choisis au moins une photo.");
+    return;
+  }
+
+  return withButtonBusy(event.submitter || els.resultPhotoForm.querySelector("button[type='submit']"), "Publication...", async () => {
+    for (const file of files) {
+      const imageDataUrl = await compressImage(file);
+      state = await api("/api/admin/result-photos", {
+        method: "POST",
+        body: JSON.stringify({
+          date: els.resultPhotoDateInput.value || null,
+          imageDataUrl,
+          note: els.resultPhotoNoteInput.value.trim(),
+          adminPin: getAdminPin()
+        }),
+        timeoutMs: 60000
+      });
+    }
+
+    els.resultPhotoInput.value = "";
+    els.resultPhotoNoteInput.value = "";
+    render();
+    showToast(files.length === 1 ? "Photo de résultat publiée." : "Photos de résultat publiées.");
+  }).catch((error) => {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message, 6000);
+  });
+}
+
 async function uploadTicketPhotos(event) {
   event.preventDefault();
   const files = Array.from(els.ticketPhotoInput.files || []);
@@ -1011,6 +1086,27 @@ async function deleteTicketPhoto(id) {
     });
     render();
     showToast("Photo supprimee.");
+  } catch (error) {
+    if (String(error.message).includes("PIN")) {
+      sessionStorage.removeItem(ADMIN_PIN_KEY);
+    }
+    showToast(error.message, 6000);
+  }
+}
+
+async function deleteResultPhoto(id) {
+  if (!id) return;
+  const confirmed = window.confirm("Supprimer cette photo de résultat?");
+  if (!confirmed) return;
+
+  try {
+    state = await api("/api/admin/result-photos/delete", {
+      method: "POST",
+      body: JSON.stringify({ id, adminPin: getAdminPin() }),
+      timeoutMs: 30000
+    });
+    render();
+    showToast("Photo supprimée.");
   } catch (error) {
     if (String(error.message).includes("PIN")) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
@@ -1131,6 +1227,7 @@ function setToday() {
 els.form.addEventListener("submit", addTransaction);
 els.drawInfoForm.addEventListener("submit", updateDrawInfo);
 els.drawResultForm.addEventListener("submit", updateDrawResult);
+els.resultPhotoForm.addEventListener("submit", uploadResultPhotos);
 els.ticketPhotoForm.addEventListener("submit", uploadTicketPhotos);
 els.participantForm.addEventListener("submit", addParticipant);
 els.applyDraw.addEventListener("click", applyDraw);
@@ -1142,6 +1239,13 @@ els.refreshCombinedTotal?.addEventListener("click", () =>
   withButtonBusy(els.refreshCombinedTotal, "Calcul...", refreshCombinedAdminTotal));
 els.transactionType.addEventListener("change", renderSelectors);
 els.resetDemo.addEventListener("click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
+els.openResultPhotos.addEventListener("click", () => els.resultPhotosModal.classList.remove("hidden"));
+els.closeResultPhotos.addEventListener("click", () => els.resultPhotosModal.classList.add("hidden"));
+els.resultPhotosModal.addEventListener("click", (event) => {
+  if (event.target === els.resultPhotosModal) {
+    els.resultPhotosModal.classList.add("hidden");
+  }
+});
 els.openTickets.addEventListener("click", () => els.ticketsModal.classList.remove("hidden"));
 els.closeTickets.addEventListener("click", () => els.ticketsModal.classList.add("hidden"));
 els.ticketsModal.addEventListener("click", (event) => {

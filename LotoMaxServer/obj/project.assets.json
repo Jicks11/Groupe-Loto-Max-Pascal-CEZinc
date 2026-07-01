@@ -1,11 +1,45 @@
 {
   "version": 4,
   "targets": {
-    "net10.0": {}
+    "net10.0": {
+      "Npgsql/9.0.3": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/Npgsql.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/Npgsql.dll": {
+            "related": ".xml"
+          }
+        }
+      }
+    }
   },
-  "libraries": {},
+  "libraries": {
+    "Npgsql/9.0.3": {
+      "sha512": "tPvY61CxOAWxNsKLEBg+oR646X4Bc8UmyQ/tJszL/7mEmIXQnnBhVJZrZEEUv0Bstu0mEsHZD5At3EO8zQRAYw==",
+      "type": "package",
+      "path": "npgsql/9.0.3",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "lib/net6.0/Npgsql.dll",
+        "lib/net6.0/Npgsql.xml",
+        "lib/net8.0/Npgsql.dll",
+        "lib/net8.0/Npgsql.xml",
+        "npgsql.9.0.3.nupkg.sha512",
+        "npgsql.nuspec",
+        "postgresql.png"
+      ]
+    }
+  },
   "projectFileDependencyGroups": {
-    "net10.0": []
+    "net10.0": [
+      "Npgsql >= 9.0.3"
+    ]
   },
   "packageFolders": {
     "C:\\Users\\pasca\\.nuget\\packages\\": {}
@@ -13,11 +47,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\LotoMaxServer\\LotoMaxServer.csproj",
+      "projectUniqueName": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\DEPLOY-RENDER-loto-max\\LotoMaxServer\\LotoMaxServer.csproj",
       "projectName": "LotoMaxServer",
-      "projectPath": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\LotoMaxServer\\LotoMaxServer.csproj",
+      "projectPath": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\DEPLOY-RENDER-loto-max\\LotoMaxServer\\LotoMaxServer.csproj",
       "packagesPath": "C:\\Users\\pasca\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\LotoMaxServer\\obj\\",
+      "outputPath": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\DEPLOY-RENDER-loto-max\\LotoMaxServer\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\pasca\\AppData\\Roaming\\NuGet\\NuGet.Config",
@@ -53,6 +87,12 @@
       "net10.0": {
         "framework": "net10.0",
         "targetAlias": "net10.0",
+        "dependencies": {
+          "Npgsql": {
+            "target": "Package",
+            "version": "[9.0.3, )"
+          }
+        },
         "imports": [
           "net461",
           "net462",

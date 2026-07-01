@@ -233,6 +233,38 @@ static void MapLotoApi(RouteGroupBuilder api, Func<LotoGroupRegistry, LotoStore>
         }
     });
 
+    api.MapPost("/admin/result-photos", (TicketPhotoRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).AddResultPhoto(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.Problem($"Erreur technique pendant l'ajout du resultat: {exception.Message}");
+        }
+    });
+
+    api.MapPost("/admin/result-photos/delete", (TicketPhotoDeleteRequest request, LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).DeleteResultPhoto(request));
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.Problem($"Erreur technique pendant la suppression du resultat: {exception.Message}");
+        }
+    });
+
     api.MapPost("/admin/ticket-photos", (TicketPhotoRequest request, LotoGroupRegistry registry) =>
     {
         try
@@ -842,6 +874,50 @@ public sealed class LotoStore
         }
     }
 
+    public LotoView AddResultPhoto(TicketPhotoRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
+            ValidateAdmin(state, request.AdminPin);
+
+            var imageDataUrl = (request.ImageDataUrl ?? "").Trim();
+            if (!imageDataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LotoException("Choisis une image valide.");
+            }
+
+            if (imageDataUrl.Length > 1_400_000)
+            {
+                throw new LotoException("L'image est trop lourde. Recadre ou compresse la capture et reessaie.");
+            }
+
+            var drawDate = request.Date ?? state.LastDrawResult.Date ?? PrizeDrawDate(state);
+            var note = CleanDrawInfoText(request.Note, 100);
+            var now = LotoClock.Now;
+            var photos = (state.ResultPhotos ?? new List<TicketPhoto>())
+                .OrderByDescending(photo => photo.CreatedAt)
+                .Take(29)
+                .ToList();
+
+            photos.Insert(0, new TicketPhoto(
+                Guid.NewGuid().ToString("N"),
+                drawDate,
+                imageDataUrl,
+                note,
+                now));
+
+            state = state with
+            {
+                ResultPhotos = photos,
+                LastUpdatedAt = now
+            };
+            Save(state, expectedLastUpdatedAt);
+            return BuildView(state);
+        }
+    }
+
     public LotoView DeleteTicketPhoto(TicketPhotoDeleteRequest request)
     {
         lock (_gate)
@@ -864,6 +940,33 @@ public sealed class LotoStore
             }
 
             state = state with { TicketPhotos = photos, LastUpdatedAt = LotoClock.Now };
+            Save(state, expectedLastUpdatedAt);
+            return BuildView(state);
+        }
+    }
+
+    public LotoView DeleteResultPhoto(TicketPhotoDeleteRequest request)
+    {
+        lock (_gate)
+        {
+            var state = Load(useCache: false);
+            var expectedLastUpdatedAt = state.LastUpdatedAt;
+            ValidateAdmin(state, request.AdminPin);
+
+            var id = (request.Id ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw new LotoException("Photo introuvable.");
+            }
+
+            var photos = state.ResultPhotos ?? new List<TicketPhoto>();
+            var removed = photos.RemoveAll(photo => photo.Id == id);
+            if (removed == 0)
+            {
+                throw new LotoException("Photo introuvable.");
+            }
+
+            state = state with { ResultPhotos = photos, LastUpdatedAt = LotoClock.Now };
             Save(state, expectedLastUpdatedAt);
             return BuildView(state);
         }
@@ -1205,6 +1308,16 @@ public sealed class LotoStore
             changed = true;
         }
 
+        if (state.ResultPhotos is null)
+        {
+            state = state with
+            {
+                ResultPhotos = new List<TicketPhoto>(),
+                LastUpdatedAt = LotoClock.Now
+            };
+            changed = true;
+        }
+
         var days = state.Settings.DeductionDays;
         var expectedDays = _config.DeductionDays;
         var alreadyExpected =
@@ -1387,6 +1500,17 @@ public sealed class LotoStore
                 photo.Note,
                 photo.CreatedAt))
             .ToList();
+        var resultPhotos = (state.ResultPhotos ?? new List<TicketPhoto>())
+            .OrderByDescending(photo => photo.Date)
+            .ThenByDescending(photo => photo.CreatedAt)
+            .Take(30)
+            .Select(photo => new TicketPhotoView(
+                photo.Id,
+                photo.Date,
+                photo.ImageDataUrl,
+                photo.Note,
+                photo.CreatedAt))
+            .ToList();
 
         return new LotoView(
             state.GroupName,
@@ -1405,6 +1529,7 @@ public sealed class LotoStore
             prizeInfo,
             lastDrawResult,
             ticketPhotos,
+            resultPhotos,
             GroupHistory(state));
     }
 
@@ -1648,6 +1773,7 @@ public sealed class LotoStore
             new List<AppliedDraw>(),
             new DrawResult(null, 0, 0, "", null, now),
             new List<TicketPhoto>(),
+            new List<TicketPhoto>(),
             now);
     }
 }
@@ -1793,6 +1919,7 @@ public sealed class LotoDatabase
 
         ExecuteNonQuery(connection, transaction, "DELETE FROM loto_applied_draws;");
         ExecuteNonQuery(connection, transaction, "DELETE FROM loto_ticket_photos;");
+        ExecuteNonQuery(connection, transaction, "DELETE FROM loto_result_photos;");
         ExecuteNonQuery(connection, transaction, "DELETE FROM loto_transactions;");
         ExecuteNonQuery(connection, transaction, "DELETE FROM loto_participants;");
         ExecuteNonQuery(connection, transaction, "DELETE FROM loto_settings;");
@@ -1960,6 +2087,23 @@ public sealed class LotoDatabase
             });
         }
 
+        foreach (var photo in (state.ResultPhotos ?? new List<TicketPhoto>())
+            .OrderByDescending(photo => photo.CreatedAt)
+            .Take(30))
+        {
+            ExecuteNonQuery(connection, transaction, """
+                INSERT INTO loto_result_photos (id, draw_date, image_data_url, note, created_at)
+                VALUES (@id, @draw_date, @image_data_url, @note, @created_at);
+                """, parameters =>
+            {
+                parameters.AddWithValue("id", photo.Id);
+                parameters.AddWithValue("draw_date", ToDateTime(photo.Date));
+                parameters.AddWithValue("image_data_url", photo.ImageDataUrl);
+                parameters.AddWithValue("note", photo.Note);
+                parameters.AddWithValue("created_at", photo.CreatedAt.ToUniversalTime());
+            });
+        }
+
         transaction.Commit();
     }
 
@@ -2054,6 +2198,17 @@ public sealed class LotoDatabase
                 CREATE INDEX IF NOT EXISTS idx_loto_ticket_photos_date
                     ON loto_ticket_photos(draw_date DESC, created_at DESC);
 
+                CREATE TABLE IF NOT EXISTS loto_result_photos (
+                    id text PRIMARY KEY,
+                    draw_date date NOT NULL,
+                    image_data_url text NOT NULL,
+                    note text NOT NULL,
+                    created_at timestamptz NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_loto_result_photos_date
+                    ON loto_result_photos(draw_date DESC, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS loto_state_snapshots (
                     id bigserial PRIMARY KEY,
                     created_at timestamptz NOT NULL,
@@ -2109,6 +2264,12 @@ public sealed class LotoDatabase
                     ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '',
                     ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
 
+                ALTER TABLE loto_result_photos
+                    ADD COLUMN IF NOT EXISTS draw_date date NOT NULL DEFAULT current_date,
+                    ADD COLUMN IF NOT EXISTS image_data_url text NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '',
+                    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
                 ALTER TABLE loto_state_snapshots
                     ADD COLUMN IF NOT EXISTS id bigserial,
                     ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
@@ -2157,6 +2318,13 @@ public sealed class LotoDatabase
                     created_by = COALESCE(created_by, 'system');
 
                 UPDATE loto_ticket_photos
+                SET
+                    draw_date = COALESCE(draw_date, current_date),
+                    image_data_url = COALESCE(image_data_url, ''),
+                    note = COALESCE(note, ''),
+                    created_at = COALESCE(created_at, now());
+
+                UPDATE loto_result_photos
                 SET
                     draw_date = COALESCE(draw_date, current_date),
                     image_data_url = COALESCE(image_data_url, ''),
@@ -2224,6 +2392,7 @@ public sealed class LotoDatabase
                     ReadString(reader, 12, ""),
                     reader.IsDBNull(13) ? null : reader.GetString(13),
                     ToDateTimeOffset(reader.GetValue(14))),
+                new List<TicketPhoto>(),
                 new List<TicketPhoto>(),
                 ToDateTimeOffset(reader.GetValue(15)));
         }
@@ -2312,12 +2481,35 @@ public sealed class LotoDatabase
             }
         }
 
+        using (var command = new NpgsqlCommand(Sql("""
+            SELECT id, draw_date, image_data_url, note, created_at
+            FROM loto_result_photos
+            ORDER BY draw_date DESC, created_at DESC
+            LIMIT 30;
+            """), connection, transaction))
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                state.ResultPhotos.Add(new TicketPhoto(
+                    reader.GetString(0),
+                    ToDateOnly(reader.GetDateTime(1)),
+                    ReadString(reader, 2, ""),
+                    ReadString(reader, 3, ""),
+                    ToDateTimeOffset(reader.GetValue(4))));
+            }
+        }
+
         return state;
     }
 
     private void SaveSnapshot(NpgsqlConnection connection, NpgsqlTransaction transaction, LotoState state, string reason)
     {
-        var snapshotState = state with { TicketPhotos = new List<TicketPhoto>() };
+        var snapshotState = state with
+        {
+            TicketPhotos = new List<TicketPhoto>(),
+            ResultPhotos = new List<TicketPhoto>()
+        };
         ExecuteNonQuery(connection, transaction, """
             INSERT INTO loto_state_snapshots (created_at, reason, payload)
             VALUES (@created_at, @reason, CAST(@payload AS jsonb));
@@ -2331,6 +2523,7 @@ public sealed class LotoDatabase
 
     private string Sql(string sql) => sql
         .Replace("loto_state_snapshots", $"{_tablePrefix}_state_snapshots", StringComparison.Ordinal)
+        .Replace("loto_result_photos", $"{_tablePrefix}_result_photos", StringComparison.Ordinal)
         .Replace("loto_ticket_photos", $"{_tablePrefix}_ticket_photos", StringComparison.Ordinal)
         .Replace("loto_applied_draws", $"{_tablePrefix}_applied_draws", StringComparison.Ordinal)
         .Replace("loto_transactions", $"{_tablePrefix}_transactions", StringComparison.Ordinal)
@@ -2457,6 +2650,7 @@ public sealed record LotoState(
     List<AppliedDraw> AppliedDraws,
     DrawResult LastDrawResult,
     List<TicketPhoto> TicketPhotos,
+    List<TicketPhoto> ResultPhotos,
     DateTimeOffset LastUpdatedAt);
 
 public sealed record LotoSettings(
@@ -2550,6 +2744,7 @@ public sealed record LotoView(
     PrizeInfoView PrizeInfo,
     DrawResultView LastDrawResult,
     List<TicketPhotoView> TicketPhotos,
+    List<TicketPhotoView> ResultPhotos,
     List<HistoryEntryView> GroupHistory);
 
 public sealed record ParticipantView(

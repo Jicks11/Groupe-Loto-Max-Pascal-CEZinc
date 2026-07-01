@@ -74,8 +74,8 @@
           </article>
           <article>
             <span>R&eacute;sultat du dernier tirage</span>
-            <strong id="lastResultAmount">$0</strong>
-            <small id="lastResultMeta">Aucun r&eacute;sultat inscrit</small>
+            <button class="accent-button compact-button metric-action" id="openResultPhotos" type="button">Voir r&eacute;sultat du dernier tirage</button>
+            <small id="resultPhotoSummary">Aucune photo ajout&eacute;e pour le moment.</small>
           </article>
           <article>
             <span>Soldes des participants</span>
@@ -264,6 +264,29 @@
 
               <div class="admin-divider" aria-hidden="true"></div>
 
+              <form class="admin-form participant-admin-form" id="resultPhotoForm">
+                <h3>Ajouter une photo du r&eacute;sultat</h3>
+
+                <label>
+                  Date du tirage
+                  <input id="resultPhotoDateInput" type="date" />
+                </label>
+
+                <label>
+                  Photo / screenshot
+                  <input id="resultPhotoInput" type="file" accept="image/*" multiple />
+                </label>
+
+                <label>
+                  Note
+                  <input id="resultPhotoNoteInput" type="text" maxlength="100" placeholder="Ex: Capture du r&eacute;sultat Loto-Qu&eacute;bec" />
+                </label>
+
+                <button class="accent-button" type="submit">Publier le r&eacute;sultat</button>
+              </form>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
               <form class="admin-form participant-admin-form" id="ticketPhotoForm">
                 <h3>Ajouter une photo de billet</h3>
 
@@ -370,8 +393,21 @@
       </div>
     </div>
 
+    <div class="modal-overlay hidden" id="resultPhotosModal" role="dialog" aria-modal="true" aria-labelledby="resultPhotosModalTitle">
+      <div class="modal-card">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">R&eacute;sultat officiel</p>
+            <h2 id="resultPhotosModalTitle">R&eacute;sultat du dernier tirage</h2>
+          </div>
+          <button class="ghost-button modal-close" id="closeResultPhotos" type="button">Fermer</button>
+        </div>
+        <div class="ticket-gallery" id="resultPhotoGallery"></div>
+      </div>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-649/app.js?v=20260701-jackpot-glow" defer></script>
+    <script src="/loto-649/app.js?v=20260701-result-photos" defer></script>
   </body>
 </html>

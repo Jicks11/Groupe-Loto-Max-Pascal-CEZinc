@@ -421,6 +421,10 @@ small {
   line-height: 1;
 }
 
+.metric-action {
+  margin: 9px 0 6px;
+}
+
 .tickets-panel {
   display: grid;
   gap: 12px;
