@@ -893,7 +893,7 @@ public sealed class LotoStore
                 throw new LotoException("L'image est trop lourde. Recadre ou compresse la capture et reessaie.");
             }
 
-            var drawDate = request.Date ?? state.LastDrawResult.Date ?? PrizeDrawDate(state);
+            var drawDate = request.Date ?? LastCompletedPublicDrawDate(state, LotoClock.Now);
             var note = CleanDrawInfoText(request.Note, 100);
             var now = LotoClock.Now;
             var photos = (state.ResultPhotos ?? new List<TicketPhoto>())
@@ -1423,6 +1423,21 @@ public sealed class LotoStore
 
     private DateOnly PrizeDrawDate(LotoState state) =>
         PublicDrawDate(state, LotoClock.Now);
+
+    private DateOnly LastCompletedPublicDrawDate(LotoState state, DateTimeOffset now)
+    {
+        var nextPublicDraw = PublicDrawDate(state, now);
+        for (var offset = 1; offset <= 14; offset++)
+        {
+            var date = nextPublicDraw.AddDays(-offset);
+            if (IsPublicDrawDay(state, date))
+            {
+                return date;
+            }
+        }
+
+        return nextPublicDraw.AddDays(-1);
+    }
 
     private static bool IsTransientDatabaseIssue(Exception exception)
     {

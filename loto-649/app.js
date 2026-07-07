@@ -640,7 +640,7 @@ function renderMetrics() {
   setInputValueUnlessFocused(els.resultAmountInput, String(result.amount || 0));
   setInputValueUnlessFocused(els.resultBonusInput, String(result.bonusEntries || 0));
   setInputValueUnlessFocused(els.resultNoteInput, result.note || "");
-  setInputValueUnlessFocused(els.resultPhotoDateInput, dateInputValue(result.date || lastResultDefaultDateIso()));
+  setInputValueUnlessFocused(els.resultPhotoDateInput, dateInputValue(lastResultDefaultDateIso() || result.date));
   setInputValueUnlessFocused(els.ticketDateInput, dateInputValue(prizeInfo.drawDate));
   els.groupWins.textContent = money(state.groupWins);
   els.winsCoverage.textContent = state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws} tirages couverts`;
@@ -739,14 +739,21 @@ function renderGroupHistory() {
 }
 
 function renderResultPhotos() {
-  const photos = state.resultPhotos || [];
-  const latestDate = photos[0]?.date || state.lastDrawResult?.date;
+  const allPhotos = state.resultPhotos || [];
+  const latestDate = lastResultDefaultDateIso() || state.lastDrawResult?.date || allPhotos[0]?.date;
+  const photos = latestDate
+    ? allPhotos.filter((photo) => String(photo.date).slice(0, 10) === latestDate)
+    : allPhotos;
+  const visiblePhotos = photos.length ? photos : (adminUnlocked ? allPhotos : []);
+  const oldPhotoCount = allPhotos.length - photos.length;
   els.resultPhotoSummary.textContent = photos.length
-    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat${latestDate ? ` du ${dateLabel(latestDate)}` : ""}.`
-    : "Aucune photo de résultat ajoutée pour le moment.";
-  els.openResultPhotos.disabled = photos.length === 0;
-  els.resultPhotoGallery.innerHTML = photos.length
-    ? photos.map(renderResultPhoto).join("")
+    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat du ${dateLabel(latestDate)}.`
+    : latestDate
+      ? `Aucune photo du résultat du ${dateLabel(latestDate)}${adminUnlocked && oldPhotoCount > 0 ? ` (${oldPhotoCount} ancienne${oldPhotoCount > 1 ? "s" : ""})` : ""}.`
+      : "Aucune photo de résultat ajoutée pour le moment.";
+  els.openResultPhotos.disabled = visiblePhotos.length === 0;
+  els.resultPhotoGallery.innerHTML = visiblePhotos.length
+    ? visiblePhotos.map(renderResultPhoto).join("")
     : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
 
   els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
