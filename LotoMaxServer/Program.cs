@@ -1565,7 +1565,9 @@ public sealed class LotoStore
     private static bool IsGroupWinsTransaction(LotoTransaction transaction) =>
         transaction.ParticipantId is null &&
         (string.Equals(transaction.Type, "gain", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(transaction.Type, "group_draw_payment", StringComparison.OrdinalIgnoreCase));
+            string.Equals(transaction.Type, "group_draw_payment", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(transaction.Type, "opening", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(transaction.Type, "correction", StringComparison.OrdinalIgnoreCase));
 
     private static decimal ParticipantBalance(LotoState state, string participantId) =>
         state.Transactions
