@@ -1041,9 +1041,14 @@ public sealed class LotoStore
         }
 
         var drawTotal = activeParticipants.Count * state.Settings.DrawCostPerParticipant;
+        if (drawTotal <= 0)
+        {
+            throw new LotoException("Le cout du tirage doit etre plus grand que 0$.");
+        }
+
         var groupWins = GroupWins(state);
 
-        if (groupWins >= drawTotal)
+        if (CanGroupWinsPayDraw(groupWins, drawTotal))
         {
             state.Transactions.Insert(0, NewTransaction(
                 date,
@@ -1487,12 +1492,13 @@ public sealed class LotoStore
             })
             .ToList();
         var participantTotal = participants.Sum(participant => participant.Balance);
-        var paidDraws = drawTotal > 0 ? (int)Math.Floor(groupWins / drawTotal) : 0;
-        var winsRemainder = drawTotal > 0 ? groupWins % drawTotal : 0;
+        var coverageGroupWins = Math.Max(0, groupWins);
+        var paidDraws = drawTotal > 0 ? (int)Math.Floor(coverageGroupWins / drawTotal) : 0;
+        var winsRemainder = drawTotal > 0 ? coverageGroupWins % drawTotal : 0;
         var nextDate = NextDueDate(state, LotoClock.Today);
         var publicDrawDate = PublicDrawDate(state, LotoClock.Now);
-        var missing = Math.Max(0, drawTotal - groupWins);
-        var nextDraw = new NextDrawView(nextDate, groupWins >= drawTotal, missing, winsRemainder);
+        var missing = Math.Max(0, drawTotal - coverageGroupWins);
+        var nextDraw = new NextDrawView(nextDate, CanGroupWinsPayDraw(coverageGroupWins, drawTotal), missing, winsRemainder);
         var prizeInfo = new PrizeInfoView(
             publicDrawDate,
             state.Settings.JackpotAmount,
@@ -1550,8 +1556,16 @@ public sealed class LotoStore
 
     private static decimal GroupWins(LotoState state) =>
         state.Transactions
-            .Where(transaction => transaction.ParticipantId is null)
+            .Where(IsGroupWinsTransaction)
             .Sum(transaction => transaction.Amount);
+
+    private static bool CanGroupWinsPayDraw(decimal groupWins, decimal drawTotal) =>
+        drawTotal > 0 && groupWins >= drawTotal;
+
+    private static bool IsGroupWinsTransaction(LotoTransaction transaction) =>
+        transaction.ParticipantId is null &&
+        (string.Equals(transaction.Type, "gain", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(transaction.Type, "group_draw_payment", StringComparison.OrdinalIgnoreCase));
 
     private static decimal ParticipantBalance(LotoState state, string participantId) =>
         state.Transactions
@@ -2014,7 +2028,6 @@ public sealed class LotoDatabase
             });
         }
 
-        var participantIds = state.Participants.Select(participant => participant.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var savedTransactionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in state.Transactions)
         {
@@ -2023,7 +2036,7 @@ public sealed class LotoDatabase
                 continue;
             }
 
-            var participantId = string.IsNullOrWhiteSpace(item.ParticipantId) || !participantIds.Contains(item.ParticipantId)
+            var participantId = string.IsNullOrWhiteSpace(item.ParticipantId)
                 ? null
                 : item.ParticipantId;
 

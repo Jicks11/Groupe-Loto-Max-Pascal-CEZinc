@@ -582,6 +582,58 @@ small {
 .admin-form {
   display: grid;
   gap: 11px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(126, 232, 255, 0.16);
+  border-left: 4px solid var(--admin-accent, rgba(126, 232, 255, 0.55));
+  border-radius: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, var(--admin-bg, rgba(35, 214, 255, 0.08)), rgba(4, 16, 32, 0.46)),
+    rgba(4, 16, 32, 0.34);
+  box-shadow: inset 0 0 20px var(--admin-shadow, rgba(35, 214, 255, 0.05));
+}
+
+#transactionForm {
+  --admin-accent: #63dfff;
+  --admin-bg: rgba(35, 214, 255, 0.11);
+  --admin-shadow: rgba(35, 214, 255, 0.08);
+}
+
+#drawInfoForm {
+  --admin-accent: #6ff7a2;
+  --admin-bg: rgba(111, 247, 162, 0.1);
+  --admin-shadow: rgba(111, 247, 162, 0.08);
+}
+
+#drawResultForm {
+  --admin-accent: #b996ff;
+  --admin-bg: rgba(185, 150, 255, 0.11);
+  --admin-shadow: rgba(185, 150, 255, 0.08);
+}
+
+#resultPhotoForm {
+  --admin-accent: #ff78d4;
+  --admin-bg: rgba(255, 120, 212, 0.1);
+  --admin-shadow: rgba(255, 120, 212, 0.08);
+}
+
+#ticketPhotoForm {
+  --admin-accent: #ffb15d;
+  --admin-bg: rgba(255, 177, 93, 0.1);
+  --admin-shadow: rgba(255, 177, 93, 0.08);
+}
+
+#participantForm {
+  --admin-accent: #8ef2ff;
+  --admin-bg: rgba(142, 242, 255, 0.08);
+  --admin-shadow: rgba(142, 242, 255, 0.06);
+}
+
+#participantManageForm {
+  --admin-accent: #ff6f7a;
+  --admin-bg: rgba(255, 111, 122, 0.09);
+  --admin-shadow: rgba(255, 111, 122, 0.07);
 }
 
 .participant-admin-form h3 {
@@ -658,13 +710,14 @@ small {
 .admin-total-card {
   display: grid;
   gap: 10px;
-  border: 1px solid rgba(126, 232, 255, 0.3);
+  border: 1px solid rgba(126, 232, 255, 0.24);
+  border-left: 4px solid #4fa3ff;
   border-radius: 8px;
   padding: 14px;
   background:
-    linear-gradient(135deg, rgba(35, 214, 255, 0.13), rgba(14, 141, 255, 0.08)),
+    linear-gradient(135deg, rgba(79, 163, 255, 0.14), rgba(14, 141, 255, 0.08)),
     rgba(4, 16, 32, 0.42);
-  box-shadow: inset 0 0 22px rgba(35, 214, 255, 0.07);
+  box-shadow: inset 0 0 22px rgba(79, 163, 255, 0.08);
 }
 
 .admin-total-card h3 {
