@@ -58,6 +58,9 @@ app.MapGet("/api/health", (LotoGroupRegistry groups) => Results.Ok(new
 }));
 app.MapGet("/loto-max/", () => Results.Content(File.ReadAllText(Path.Combine(lotoMaxRoot, "index.html")), "text/html; charset=utf-8"));
 app.MapGet("/loto-649/", () => Results.Content(File.ReadAllText(Path.Combine(loto649Root, "index.html")), "text/html; charset=utf-8"));
+// Root fallbacks so relative href="styles.css" / src="app.js" also work from "/"
+app.MapGet("/styles.css", () => Results.File(Path.Combine(lotoMaxRoot, "styles.css"), "text/css; charset=utf-8"));
+app.MapGet("/app.js", () => Results.File(Path.Combine(lotoMaxRoot, "app.js"), "text/javascript; charset=utf-8"));
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(lotoMaxRoot),
@@ -81,7 +84,8 @@ static void MapLotoApi(RouteGroupBuilder api, Func<LotoGroupRegistry, LotoStore>
     {
         try
         {
-            return Results.Ok(getStore(registry).GetView());
+            // Photos base64 are huge — first paint loads metadata only (see /ticket-photos & /result-photos).
+            return Results.Ok(getStore(registry).GetView(includePhotoBytes: false));
         }
         catch (LotoException exception)
         {
@@ -92,6 +96,41 @@ static void MapLotoApi(RouteGroupBuilder api, Func<LotoGroupRegistry, LotoStore>
             return Results.BadRequest(new { error = $"Erreur technique pendant le chargement: {exception.Message}" });
         }
     });
+
+    api.MapGet("/ticket-photos", (LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).GetTicketPhotos());
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant le chargement des billets: {exception.Message}" });
+        }
+    });
+
+    api.MapGet("/result-photos", (LotoGroupRegistry registry) =>
+    {
+        try
+        {
+            return Results.Ok(getStore(registry).GetResultPhotos());
+        }
+        catch (LotoException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            return Results.BadRequest(new { error = $"Erreur technique pendant le chargement des resultats: {exception.Message}" });
+        }
+    });
+
+    // Lightweight wake-up for free-tier hosts (Render cold start).
+    api.MapGet("/ping", () => Results.Ok(new { ok = true, at = DateTimeOffset.UtcNow }));
 
     api.MapPost("/transactions", (TransactionRequest request, LotoGroupRegistry registry) =>
     {
@@ -460,12 +499,52 @@ public sealed class LotoStore
 
     public string StorageMode => _database is null ? "file" : "postgres";
 
-    public LotoView GetView()
+    public LotoView GetView(bool includePhotoBytes = true)
     {
         lock (_gate)
         {
             var state = Load(useCache: true);
-            return BuildView(state);
+            return BuildView(state, includePhotoBytes);
+        }
+    }
+
+    public object GetTicketPhotos()
+    {
+        lock (_gate)
+        {
+            var state = Load(useCache: true);
+            var photos = (state.TicketPhotos ?? new List<TicketPhoto>())
+                .OrderByDescending(photo => photo.Date)
+                .ThenByDescending(photo => photo.CreatedAt)
+                .Take(30)
+                .Select(photo => new TicketPhotoView(
+                    photo.Id,
+                    photo.Date,
+                    photo.ImageDataUrl,
+                    photo.Note,
+                    photo.CreatedAt))
+                .ToList();
+            return new { photos };
+        }
+    }
+
+    public object GetResultPhotos()
+    {
+        lock (_gate)
+        {
+            var state = Load(useCache: true);
+            var photos = (state.ResultPhotos ?? new List<TicketPhoto>())
+                .OrderByDescending(photo => photo.Date)
+                .ThenByDescending(photo => photo.CreatedAt)
+                .Take(30)
+                .Select(photo => new TicketPhotoView(
+                    photo.Id,
+                    photo.Date,
+                    photo.ImageDataUrl,
+                    photo.Note,
+                    photo.CreatedAt))
+                .ToList();
+            return new { photos };
         }
     }
 
@@ -1465,7 +1544,7 @@ public sealed class LotoStore
         return false;
     }
 
-    private LotoView BuildView(LotoState state)
+    private LotoView BuildView(LotoState state, bool includePhotoBytes = true)
     {
         var activeParticipants = state.Participants.Where(participant => participant.Active).ToList();
         var drawTotal = activeParticipants.Count * state.Settings.DrawCostPerParticipant;
@@ -1517,7 +1596,7 @@ public sealed class LotoStore
             .Select(photo => new TicketPhotoView(
                 photo.Id,
                 photo.Date,
-                photo.ImageDataUrl,
+                includePhotoBytes ? photo.ImageDataUrl : "",
                 photo.Note,
                 photo.CreatedAt))
             .ToList();
@@ -1528,7 +1607,7 @@ public sealed class LotoStore
             .Select(photo => new TicketPhotoView(
                 photo.Id,
                 photo.Date,
-                photo.ImageDataUrl,
+                includePhotoBytes ? photo.ImageDataUrl : "",
                 photo.Note,
                 photo.CreatedAt))
             .ToList();
