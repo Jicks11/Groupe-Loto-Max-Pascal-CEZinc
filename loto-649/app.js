@@ -1,6 +1,7 @@
 const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
+const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v2`;
 const REFRESH_INTERVAL_MS = 30000;
 const API_TIMEOUT_MS = 15000;
 const RENDER_API_ORIGIN = "https://groupe-loto-max-pascal-cezinc.onrender.com";
@@ -10,6 +11,19 @@ const sameOriginApi = LOCAL_HOSTS.has(host) || host.endsWith(".onrender.com");
 const API_ORIGIN = (window.LOTO_API_ORIGIN || (sameOriginApi ? "" : RENDER_API_ORIGIN)).replace(/\/$/, "");
 const API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
 const API_BASE = `${API_ORIGIN}${API_BASE_PATH}`;
+
+/** Kick Render free-tier awake ASAP (before the rest of the UI binds). */
+function wakeServerEarly() {
+  try {
+    const url = `${API_BASE}/ping`;
+    fetch(url, { method: "GET", cache: "no-store", mode: "cors" }).catch(() => {});
+    // Second call: real state path (warms DB + cache).
+    fetch(`${API_BASE}/state`, { method: "GET", cache: "no-store", mode: "cors" }).catch(() => {});
+  } catch {
+    // ignore
+  }
+}
+wakeServerEarly();
 const ADMIN_BUTTON_LABEL = "Mode Admin r\u00e9serv\u00e9 \u00e0 Pascal";
 const CURRENT_GROUP_LABEL = APP_SCOPE === "loto-649" ? "6/49" : "Loto Max";
 const OTHER_GROUP_LABEL = APP_SCOPE === "loto-649" ? "Loto Max" : "6/49";
@@ -134,6 +148,36 @@ let startupRetryTimer = null;
 let otherGroupState = null;
 let combinedTotalLoading = false;
 let combinedTotalError = "";
+let ticketPhotosHydrated = false;
+let resultPhotosHydrated = false;
+
+function readCachedState() {
+  try {
+    const raw = localStorage.getItem(STATE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.state?.participants) return null;
+    // Keep cache for 14 days — good enough for a snappy first paint.
+    if (parsed.savedAt && Date.now() - parsed.savedAt > 14 * 24 * 60 * 60 * 1000) return null;
+    return parsed.state;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedState(nextState) {
+  try {
+    // Never persist heavy base64 photos in localStorage.
+    const light = {
+      ...nextState,
+      ticketPhotos: (nextState.ticketPhotos || []).map((p) => ({ ...p, imageDataUrl: "" })),
+      resultPhotos: (nextState.resultPhotos || []).map((p) => ({ ...p, imageDataUrl: "" }))
+    };
+    localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), state: light }));
+  } catch {
+    // quota / private mode
+  }
+}
 
 function setStartupProgress(message, percent) {
   if (els.startupMessage) {
@@ -170,7 +214,7 @@ function hideStartupLoading() {
   setStartupProgress("Donnees chargees.", 100);
   window.setTimeout(() => {
     els.startupOverlay?.classList.add("hidden");
-  }, 180);
+  }, 60);
 }
 
 function money(value) {
@@ -194,6 +238,14 @@ function dateInputValue(isoDate) {
   return isoDate ? String(isoDate).slice(0, 10) : "";
 }
 
+function previousDayIso(isoDate) {
+  if (!isoDate) return isoDate;
+  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setDate(date.getDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function previousScheduledDrawIso(referenceIso, drawDays) {
   if (!referenceIso) return "";
   const reference = new Date(`${String(referenceIso).slice(0, 10)}T12:00:00`);
@@ -207,12 +259,12 @@ function previousScheduledDrawIso(referenceIso, drawDays) {
     }
   }
 
-  return "";
+  return previousDayIso(referenceIso);
 }
 
 function lastResultDefaultDateIso() {
-  const nextPublicDraw = state?.prizeInfo?.drawDate || state?.nextDraw?.date;
-  return previousScheduledDrawIso(nextPublicDraw, [3, 6]);
+  const nextPublicDraw = state?.prizeInfo?.drawDate || previousDayIso(state?.nextDraw?.date);
+  return previousScheduledDrawIso(nextPublicDraw, [2, 5]);
 }
 
 function resultDateForDisplay(result, prizeDrawDate) {
@@ -232,8 +284,12 @@ function resultDateForDisplay(result, prizeDrawDate) {
   return resultDate;
 }
 
-function publicDrawDateLabel() {
-  return dateLabel(state.prizeInfo?.drawDate || state.nextDraw.date);
+function nextDrawDateLabel() {
+  return dateLabel(state.prizeInfo?.drawDate || previousDayIso(state.nextDraw.date));
+}
+
+function nextPaymentDateLabel() {
+  return dateLabel(state.nextDraw.date);
 }
 
 function setInputValueUnlessFocused(input, value) {
@@ -275,8 +331,8 @@ function parsePrizeAmount(value) {
 function jackpotToneClass(prizeText) {
   const amount = parsePrizeAmount(prizeText);
   if (!amount || amount < 15000000) return "jackpot-tone-white";
-  if (amount >= 70000000) return "jackpot-tone-rose";
-  if (amount >= 60000000) return "jackpot-tone-orange";
+  if (amount >= 90000000) return "jackpot-tone-rose";
+  if (amount >= 70000000) return "jackpot-tone-orange";
   if (amount >= 50000000) return "jackpot-tone-violet";
   if (amount >= 30000000) return "jackpot-tone-blue";
   return "jackpot-tone-green";
@@ -294,7 +350,7 @@ function prizeShareText(prizeText) {
     return "Part par participant: à confirmer";
   }
 
-  return `Si la boule d'or est gagnée: environ ${money(amount / activeCount)} par participant actif (${activeCount} actifs)`;
+  return `Si le gros lot est gagné: environ ${money(amount / activeCount)} par participant actif (${activeCount} actifs)`;
 }
 
 function resultMetaText(result) {
@@ -468,13 +524,33 @@ async function loadState({ silent = false } = {}) {
   if (!silent && !state) {
     els.lastUpdated.textContent = "Chargement des donnees...";
     showStartupLoading();
+  } else if (!silent && state) {
+    // Cache already painted — soft refresh, no blocking overlay.
+    setStartupProgress("Mise a jour des soldes...", 70);
   }
 
   try {
+    const previous = state;
     state = await api("/api/state", { timeoutMs: 60000 });
+    // Keep already-hydrated photo bytes when /state returns metadata only.
+    if (previous?.ticketPhotos?.some((p) => p.imageDataUrl) && state.ticketPhotos) {
+      const map = new Map(previous.ticketPhotos.map((p) => [p.id, p.imageDataUrl]));
+      state.ticketPhotos = state.ticketPhotos.map((p) => (
+        p.imageDataUrl ? p : { ...p, imageDataUrl: map.get(p.id) || "" }
+      ));
+    }
+    if (previous?.resultPhotos?.some((p) => p.imageDataUrl) && state.resultPhotos) {
+      const map = new Map(previous.resultPhotos.map((p) => [p.id, p.imageDataUrl]));
+      state.resultPhotos = state.resultPhotos.map((p) => (
+        p.imageDataUrl ? p : { ...p, imageDataUrl: map.get(p.id) || "" }
+      ));
+    }
+    ticketPhotosHydrated = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
+    resultPhotosHydrated = (state.resultPhotos || []).some((p) => p.imageDataUrl);
     if (!selectedId || !state.participants.some((participant) => participant.id === selectedId)) {
       selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
     }
+    writeCachedState(state);
     render();
     if (adminUnlocked) {
       refreshCombinedAdminTotal();
@@ -482,15 +558,49 @@ async function loadState({ silent = false } = {}) {
     hideStartupLoading();
   } catch (error) {
     if (!silent) {
-      showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
+      if (state) {
+        // Keep cached UI visible while server wakes.
+        showToast(`Mise a jour en cours: ${error.message}`, 4000);
+      } else {
+        showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
+      }
       if (!state) {
-        setStartupProgress("Le service de donnees se reveille. Nouvel essai dans quelques secondes.", 88);
+        setStartupProgress("Le service de donnees se reveille. Nouvel essai dans 2 secondes…", 88);
         window.clearTimeout(startupRetryTimer);
-        startupRetryTimer = window.setTimeout(() => loadState(), 5000);
+        startupRetryTimer = window.setTimeout(() => loadState(), 2000);
+      } else {
+        window.clearTimeout(startupRetryTimer);
+        startupRetryTimer = window.setTimeout(() => loadState({ silent: true }), 3000);
       }
     }
   } finally {
     stateLoading = false;
+  }
+}
+
+async function ensureTicketPhotos() {
+  if (!state) return;
+  if (ticketPhotosHydrated && (state.ticketPhotos || []).some((p) => p.imageDataUrl)) return;
+  try {
+    const data = await api("/api/ticket-photos", { timeoutMs: 60000 });
+    state.ticketPhotos = data.photos || data || [];
+    ticketPhotosHydrated = true;
+    renderTickets();
+  } catch (error) {
+    showToast(`Photos des billets: ${error.message}`, 5000);
+  }
+}
+
+async function ensureResultPhotos() {
+  if (!state) return;
+  if (resultPhotosHydrated && (state.resultPhotos || []).some((p) => p.imageDataUrl)) return;
+  try {
+    const data = await api("/api/result-photos", { timeoutMs: 60000 });
+    state.resultPhotos = data.photos || data || [];
+    resultPhotosHydrated = true;
+    renderResultPhotos();
+  } catch (error) {
+    showToast(`Photos de resultat: ${error.message}`, 5000);
   }
 }
 
@@ -628,10 +738,10 @@ function renderMetrics() {
   const lastUpdated = new Date(state.lastUpdatedAt);
   const prizeInfo = state.prizeInfo || {};
 
-  els.publicDrawDate.textContent = publicDrawDateLabel();
+  els.publicDrawDate.textContent = nextDrawDateLabel();
   els.jackpotAmount.textContent = (prizeInfo.jackpotAmount || "").trim() || "À confirmer";
   applyJackpotTone(prizeInfo.jackpotAmount);
-  els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Gros lot de base: 5 millions";
+  els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Lots additionnels à confirmer";
   els.prizeShareEstimate.textContent = prizeShareText(prizeInfo.jackpotAmount);
   setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
   setInputValueUnlessFocused(els.secondaryPrizesInput, prizeInfo.secondaryPrizes || "");
@@ -658,10 +768,10 @@ function renderMetrics() {
 
   if (state.nextDraw.coveredByGains) {
     els.nextDrawStatus.textContent = "Payé par nos gains";
-    els.drawMeterText.textContent = `Le prochain paiement automatique est couvert par nos gains. Il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
+    els.drawMeterText.textContent = `Le prochain paiement automatique est couvert par nos gains. Le retrait passera le ${nextPaymentDateLabel()}; il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
   } else {
     els.nextDrawStatus.textContent = `${money(state.nextDraw.missingAmount)} manquant`;
-    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} dans nos gains pour couvrir le prochain paiement automatique. Si nos gains ne suffisent pas, un retrait de ${money(state.drawCostPerParticipant)} par participant sera appliqué.`;
+    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} dans nos gains pour couvrir le prochain paiement automatique. Si nos gains ne suffisent pas, un retrait de ${money(state.drawCostPerParticipant)} par participant sera appliqué le ${nextPaymentDateLabel()}.`;
   }
 }
 
@@ -1023,6 +1133,8 @@ async function uploadResultPhotos(event) {
 
     els.resultPhotoInput.value = "";
     els.resultPhotoNoteInput.value = "";
+    resultPhotosHydrated = true;
+    writeCachedState(state);
     render();
     showToast(files.length === 1 ? "Photo de résultat publiée." : "Photos de résultat publiées.");
   }).catch((error) => {
@@ -1058,6 +1170,8 @@ async function uploadTicketPhotos(event) {
 
     els.ticketPhotoInput.value = "";
     els.ticketNoteInput.value = "";
+    ticketPhotosHydrated = true;
+    writeCachedState(state);
     render();
     showToast(files.length === 1 ? "Photo de billet publiee." : "Photos de billets publiees.");
   }).catch((error) => {
@@ -1234,14 +1348,22 @@ els.refreshCombinedTotal?.addEventListener("click", () =>
   withButtonBusy(els.refreshCombinedTotal, "Calcul...", refreshCombinedAdminTotal));
 els.transactionType.addEventListener("change", renderSelectors);
 els.resetDemo.addEventListener("click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
-els.openResultPhotos.addEventListener("click", () => els.resultPhotosModal.classList.remove("hidden"));
+els.openResultPhotos.addEventListener("click", async () => {
+  els.resultPhotosModal.classList.remove("hidden");
+  els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+  await ensureResultPhotos();
+});
 els.closeResultPhotos.addEventListener("click", () => els.resultPhotosModal.classList.add("hidden"));
 els.resultPhotosModal.addEventListener("click", (event) => {
   if (event.target === els.resultPhotosModal) {
     els.resultPhotosModal.classList.add("hidden");
   }
 });
-els.openTickets.addEventListener("click", () => els.ticketsModal.classList.remove("hidden"));
+els.openTickets.addEventListener("click", async () => {
+  els.ticketsModal.classList.remove("hidden");
+  els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+  await ensureTicketPhotos();
+});
 els.closeTickets.addEventListener("click", () => els.ticketsModal.classList.add("hidden"));
 els.ticketsModal.addEventListener("click", (event) => {
   if (event.target === els.ticketsModal) {
@@ -1253,5 +1375,20 @@ els.resetDemo.textContent = "Rafraichir";
 els.adminNote.textContent = "";
 
 setToday();
+
+// Instant first paint from last visit (while server wakes / refreshes).
+const cachedBoot = readCachedState();
+if (cachedBoot) {
+  state = cachedBoot;
+  if (!selectedId || !state.participants.some((p) => p.id === selectedId)) {
+    selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
+  }
+  render();
+  hideStartupLoading();
+  if (els.lastUpdated) {
+    els.lastUpdated.textContent = "Mise a jour en arriere-plan…";
+  }
+}
+
 loadState();
 window.setInterval(() => loadState({ silent: true }), REFRESH_INTERVAL_MS);
