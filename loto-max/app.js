@@ -189,21 +189,22 @@ function setStartupProgress(message, percent) {
 }
 
 function showStartupLoading() {
-  if (!els.startupOverlay || state) return;
-
-  startupStartedAt = startupStartedAt || Date.now();
+  if (!els.startupOverlay) return;
+  // Always show overlay while the first network load is in progress.
   els.startupOverlay.classList.remove("hidden");
+  startupStartedAt = Date.now();
   window.clearInterval(startupTimer);
+  setStartupProgress("Connexion aux donnees du groupe…", 12);
   startupTimer = window.setInterval(() => {
     const elapsed = Date.now() - startupStartedAt;
-    const percent = elapsed < 5000
-      ? 18 + elapsed / 5000 * 45
-      : Math.min(90, 63 + (elapsed - 5000) / 20000 * 27);
-    const message = elapsed > 7000
-      ? "Le service de donnees se reveille. Les soldes vont apparaitre automatiquement."
-      : "Connexion aux donnees du groupe.";
+    const percent = elapsed < 4000
+      ? 12 + (elapsed / 4000) * 50
+      : Math.min(92, 62 + ((elapsed - 4000) / 15000) * 30);
+    const message = elapsed > 6000
+      ? "Le serveur se reveille (Render). Patiente quelques secondes…"
+      : "Connexion aux donnees du groupe…";
     setStartupProgress(message, percent);
-  }, 450);
+  }, 200);
 }
 
 function hideStartupLoading() {
@@ -214,7 +215,7 @@ function hideStartupLoading() {
   setStartupProgress("Donnees chargees.", 100);
   window.setTimeout(() => {
     els.startupOverlay?.classList.add("hidden");
-  }, 60);
+  }, 80);
 }
 
 function money(value) {
@@ -532,15 +533,14 @@ async function loadState({ silent = false } = {}) {
   }
 
   stateLoading = true;
-  if (!silent && !state) {
-    els.lastUpdated.textContent = "Chargement des donnees...";
-    showStartupLoading();
-  } else if (!silent && state) {
-    // Cache already painted — soft refresh, no blocking overlay.
-    setStartupProgress("Mise a jour des soldes...", 70);
-  }
-
   try {
+    if (!silent && !state) {
+      setText(els.lastUpdated, "Chargement des donnees...");
+      showStartupLoading();
+    } else if (!silent && state) {
+      setStartupProgress("Mise a jour des soldes...", 70);
+    }
+
     const previous = state;
     state = await api("/api/state", { timeoutMs: 60000 });
     // Keep already-hydrated photo bytes when /state returns metadata only.
@@ -575,7 +575,6 @@ async function loadState({ silent = false } = {}) {
   } catch (error) {
     if (!silent) {
       if (state) {
-        // Keep cached UI visible while server wakes.
         showToast(`Mise a jour en cours: ${error.message}`, 4000);
         hideStartupLoading();
       } else {
@@ -1427,7 +1426,22 @@ if (els.adminNote) els.adminNote.textContent = "";
 
 setToday();
 
-// Instant first paint from last visit (while server wakes / refreshes).
+// Wipe broken older caches once (v1/v2 could freeze the progress bar).
+try {
+  ["loto-max-state-cache-v2", "loto-649-state-cache-v2", "loto-max-state-cache", "loto-649-state-cache"]
+    .forEach((key) => localStorage.removeItem(key));
+} catch { /* ignore */ }
+
+// Force clean start if ?reset=1 in URL (useful on iPhone PWA).
+try {
+  if (new URLSearchParams(location.search).has("reset")) {
+    Object.keys(localStorage)
+      .filter((key) => key.includes("loto-") || key.includes("state-cache"))
+      .forEach((key) => localStorage.removeItem(key));
+  }
+} catch { /* ignore */ }
+
+// Optional instant paint from last good visit — never block the network load.
 const cachedBoot = readCachedState();
 if (cachedBoot?.participants?.length && cachedBoot?.nextDraw) {
   try {
@@ -1436,19 +1450,15 @@ if (cachedBoot?.participants?.length && cachedBoot?.nextDraw) {
       selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
     }
     render();
-    hideStartupLoading();
-    if (els.lastUpdated) {
-      els.lastUpdated.textContent = "Mise a jour en arriere-plan…";
-    }
+    setText(els.lastUpdated, "Mise a jour en arriere-plan…");
   } catch (error) {
     console.error("Cache boot failed", error);
     state = null;
     try { localStorage.removeItem(STATE_CACHE_KEY); } catch { /* ignore */ }
-    showStartupLoading();
   }
-} else {
-  showStartupLoading();
 }
 
+// Always run a real network load (and always animate the progress bar until it finishes).
+showStartupLoading();
 loadState();
 window.setInterval(() => loadState({ silent: true }), REFRESH_INTERVAL_MS);

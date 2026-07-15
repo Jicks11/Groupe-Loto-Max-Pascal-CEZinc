@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+bin
+obj
+**/bin
+**/obj
+PreviewCapture/bin
+PreviewCapture/obj
+cloudflared.exe
+cloudflared.out.log
+cloudflared.err.log
+*.png
+*.work
+data
+loto-dotnet*.log

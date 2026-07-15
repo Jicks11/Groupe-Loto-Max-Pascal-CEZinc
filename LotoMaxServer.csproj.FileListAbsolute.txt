@@ -1,8 +1,0 @@
-{
-  "version": 2,
-  "dgSpecHash": "hoCBumjEPvU=",
-  "success": true,
-  "projectFilePath": "C:\\Users\\pasca\\Documents\\Codex\\2026-06-22\\des-idee-de-logiciel-pratique-quon\\LotoMaxServer\\LotoMaxServer.csproj",
-  "expectedPackageFiles": [],
-  "logs": []
-}
