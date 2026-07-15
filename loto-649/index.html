@@ -55,6 +55,8 @@
 
         <div class="status-strip" aria-label="Derniere mise a jour du groupe">
           <span id="lastUpdated">Derniere mise a jour: chargement...</span>
+          <a class="pill" href="/loto-max/">Loto Max</a>
+          <a class="pill" href="/loto-649/" aria-current="page">Groupe 6/49</a>
         </div>
       </header>
 
@@ -425,18 +427,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script>
-      (function () {
-        var candidates = [
-          "/loto-649/app.js?v=20260715-ui-fix",
-          "app.js?v=20260715-ui-fix"
-        ];
-        var s = document.createElement("script");
-        s.defer = true;
-        s.src = candidates[0];
-        s.onerror = function () { s.onerror = null; s.src = candidates[1]; };
-        document.body.appendChild(s);
-      })();
-    </script>
+    <script src="/loto-649/app.js?v=20260715-fix2" defer></script>
   </body>
 </html>

@@ -53,6 +53,8 @@
 
         <div class="status-strip" aria-label="Derniere mise a jour du groupe">
           <span id="lastUpdated">Derniere mise a jour: chargement...</span>
+          <a class="pill" href="/loto-max/" aria-current="page">Loto Max</a>
+          <a class="pill" href="/loto-649/">Groupe 6/49</a>
         </div>
       </header>
 
@@ -423,23 +425,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script>
-      // One script only — pick path from current page (root, /loto-max/, or CF Pages).
-      (function () {
-        var path = (location.pathname || "").toLowerCase();
-        var base = path.indexOf("/loto-649") === 0 ? "/loto-649/" : "/loto-max/";
-        if (path === "/" || path === "") base = "/loto-max/";
-        // Relative fallback when opened as /loto-max/index.html without host rewrite
-        var candidates = [
-          base + "app.js?v=20260715-ui-fix",
-          "app.js?v=20260715-ui-fix"
-        ];
-        var s = document.createElement("script");
-        s.defer = true;
-        s.src = candidates[0];
-        s.onerror = function () { s.onerror = null; s.src = candidates[1]; };
-        document.body.appendChild(s);
-      })();
-    </script>
+    <script src="/loto-max/app.js?v=20260715-fix2" defer></script>
   </body>
 </html>

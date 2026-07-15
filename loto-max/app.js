@@ -1,7 +1,7 @@
 const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
-const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v2`;
+const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v3`;
 const REFRESH_INTERVAL_MS = 30000;
 const API_TIMEOUT_MS = 15000;
 const RENDER_API_ORIGIN = "https://groupe-loto-max-pascal-cezinc.onrender.com";
@@ -285,11 +285,21 @@ function resultDateForDisplay(result, prizeDrawDate) {
 }
 
 function nextDrawDateLabel() {
-  return dateLabel(state.prizeInfo?.drawDate || previousDayIso(state.nextDraw.date));
+  return dateLabel(state?.prizeInfo?.drawDate || previousDayIso(state?.nextDraw?.date));
 }
 
 function nextPaymentDateLabel() {
-  return dateLabel(state.nextDraw.date);
+  return dateLabel(state?.nextDraw?.date);
+}
+
+function on(el, event, handler) {
+  if (!el || typeof el.addEventListener !== "function") return;
+  el.addEventListener(event, handler);
+}
+
+function setText(el, value) {
+  if (!el) return;
+  el.textContent = value;
 }
 
 function setInputValueUnlessFocused(input, value) {
@@ -339,13 +349,14 @@ function jackpotToneClass(prizeText) {
 }
 
 function applyJackpotTone(prizeText) {
+  if (!els.jackpotAmount) return;
   els.jackpotAmount.classList.remove(...JACKPOT_TONE_CLASSES);
   els.jackpotAmount.classList.add(jackpotToneClass(prizeText));
 }
 
 function prizeShareText(prizeText) {
   const amount = parsePrizeAmount(prizeText);
-  const activeCount = state.participants.filter((participant) => participant.active).length;
+  const activeCount = (state?.participants || []).filter((participant) => participant.active).length;
   if (!amount || activeCount <= 0) {
     return "Part par participant: à confirmer";
   }
@@ -547,30 +558,31 @@ async function loadState({ silent = false } = {}) {
     }
     ticketPhotosHydrated = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
     resultPhotosHydrated = (state.resultPhotos || []).some((p) => p.imageDataUrl);
-    if (!selectedId || !state.participants.some((participant) => participant.id === selectedId)) {
-      selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
+    if (!selectedId || !(state.participants || []).some((participant) => participant.id === selectedId)) {
+      selectedId = state.participants?.at(-1)?.id || state.participants?.[0]?.id;
     }
     writeCachedState(state);
-    render();
+    try {
+      render();
+    } catch (renderError) {
+      console.error(renderError);
+      showToast("Affichage partiel — reessai…", 3000);
+    }
     if (adminUnlocked) {
       refreshCombinedAdminTotal();
     }
-    hideStartupLoading();
+    if (!silent) hideStartupLoading();
   } catch (error) {
     if (!silent) {
       if (state) {
         // Keep cached UI visible while server wakes.
         showToast(`Mise a jour en cours: ${error.message}`, 4000);
+        hideStartupLoading();
       } else {
         showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
-      }
-      if (!state) {
         setStartupProgress("Le service de donnees se reveille. Nouvel essai dans 2 secondes…", 88);
         window.clearTimeout(startupRetryTimer);
         startupRetryTimer = window.setTimeout(() => loadState(), 2000);
-      } else {
-        window.clearTimeout(startupRetryTimer);
-        startupRetryTimer = window.setTimeout(() => loadState({ silent: true }), 3000);
       }
     }
   } finally {
@@ -696,53 +708,75 @@ function getSelectedParticipant() {
 
 function render() {
   if (!state) return;
-  renderSelectors();
-  renderMetrics();
-  renderParticipants();
-  renderMemberDetail();
-  renderGroupHistory();
-  renderResultPhotos();
-  renderTickets();
-  renderAdminMode();
+  try {
+    renderSelectors();
+    renderMetrics();
+    renderParticipants();
+    renderMemberDetail();
+    renderGroupHistory();
+    renderResultPhotos();
+    renderTickets();
+    renderAdminMode();
+  } catch (error) {
+    console.error("Render error", error);
+    try { localStorage.removeItem(STATE_CACHE_KEY); } catch { /* ignore */ }
+    throw error;
+  }
 }
 
 function renderSelectors() {
+  if (!els.participantSelect || !els.manageParticipantSelect) return;
   const currentValue = els.participantSelect.value || selectedId;
   const currentManageValue = els.manageParticipantSelect.value || selectedId;
-  els.participantSelect.innerHTML = state.participants
+  els.participantSelect.innerHTML = (state.participants || [])
     .map((participant) => `<option value="${escapeHtml(participant.id)}">${escapeHtml(participant.name)}</option>`)
     .join("");
   els.manageParticipantSelect.innerHTML = els.participantSelect.innerHTML;
   els.participantSelect.value = currentValue;
   els.manageParticipantSelect.value = currentManageValue;
 
-  const isGroupGain = els.transactionType.value === "gain";
-  els.participantField.style.display = isGroupGain ? "none" : "grid";
-  els.amountLabel.textContent =
-    els.transactionType.value === "set_balance"
-      ? "Nouveau solde exact"
-      : els.transactionType.value === "withdrawal"
-        ? "Montant à enlever"
-        : "Montant";
-  if (isGroupGain) {
-    els.paymentMode.value = "Billet gratuit";
-  } else if (els.transactionType.value === "set_balance") {
-    els.paymentMode.value = "Correction";
-  } else if (els.transactionType.value === "withdrawal") {
-    els.paymentMode.value = "Trop-perçu";
+  const type = els.transactionType?.value || "deposit";
+  const isGroupGain = type === "gain";
+  if (els.participantField) {
+    els.participantField.style.display = isGroupGain ? "none" : "grid";
+  }
+  if (els.amountLabel) {
+    els.amountLabel.textContent =
+      type === "set_balance"
+        ? "Nouveau solde exact"
+        : type === "withdrawal"
+          ? "Montant à enlever"
+          : "Montant";
+  }
+  if (els.paymentMode) {
+    if (isGroupGain) {
+      els.paymentMode.value = "Billet gratuit";
+    } else if (type === "set_balance") {
+      els.paymentMode.value = "Correction";
+    } else if (type === "withdrawal") {
+      els.paymentMode.value = "Trop-perçu";
+    }
   }
 }
 
 function renderMetrics() {
-  const coverageRatio = state.drawTotal > 0 ? Math.min(state.groupWins / state.drawTotal, 1) : 0;
-  const lastUpdated = new Date(state.lastUpdatedAt);
+  const drawTotal = Number(state.drawTotal || 0);
+  const groupWins = Number(state.groupWins || 0);
+  const coverageRatio = drawTotal > 0 ? Math.min(groupWins / drawTotal, 1) : 0;
+  const lastUpdated = new Date(state.lastUpdatedAt || Date.now());
   const prizeInfo = state.prizeInfo || {};
+  const nextDraw = state.nextDraw || {
+    date: "",
+    coveredByGains: false,
+    missingAmount: drawTotal,
+    remainderAfterPayment: 0
+  };
 
-  els.publicDrawDate.textContent = nextDrawDateLabel();
-  els.jackpotAmount.textContent = (prizeInfo.jackpotAmount || "").trim() || "À confirmer";
+  setText(els.publicDrawDate, nextDrawDateLabel());
+  setText(els.jackpotAmount, (prizeInfo.jackpotAmount || "").trim() || "À confirmer");
   applyJackpotTone(prizeInfo.jackpotAmount);
-  els.secondaryPrizes.textContent = (prizeInfo.secondaryPrizes || "").trim() || "Lots additionnels à confirmer";
-  els.prizeShareEstimate.textContent = prizeShareText(prizeInfo.jackpotAmount);
+  setText(els.secondaryPrizes, (prizeInfo.secondaryPrizes || "").trim() || "Lots additionnels à confirmer");
+  setText(els.prizeShareEstimate, prizeShareText(prizeInfo.jackpotAmount));
   setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
   setInputValueUnlessFocused(els.secondaryPrizesInput, prizeInfo.secondaryPrizes || "");
   const result = state.lastDrawResult || {};
@@ -752,31 +786,43 @@ function renderMetrics() {
   setInputValueUnlessFocused(els.resultNoteInput, result.note || "");
   setInputValueUnlessFocused(els.resultPhotoDateInput, dateInputValue(lastResultDefaultDateIso() || result.date));
   setInputValueUnlessFocused(els.ticketDateInput, dateInputValue(prizeInfo.drawDate));
-  els.groupWins.textContent = money(state.groupWins);
-  els.winsCoverage.textContent = state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws} tirages couverts`;
-  els.participantTotal.textContent = money(state.participantTotal);
-  els.groupTotal.textContent = money(state.groupTotal);
+  setText(els.groupWins, money(groupWins));
+  setText(els.winsCoverage, state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws || 0} tirages couverts`);
+  setText(els.participantTotal, money(state.participantTotal));
+  setText(els.groupTotal, money(state.groupTotal));
   if (els.drawTotal) {
-    els.drawTotal.textContent = money(state.drawTotal);
+    els.drawTotal.textContent = money(drawTotal);
   }
   if (els.drawFormula) {
-    els.drawFormula.textContent = `${state.participants.filter((participant) => participant.active).length} x ${money(state.drawCostPerParticipant)}`;
+    els.drawFormula.textContent = `${(state.participants || []).filter((participant) => participant.active).length} x ${money(state.drawCostPerParticipant)}`;
   }
-  els.activeCount.textContent = `${state.participants.filter((participant) => participant.active).length} actifs`;
-  els.lastUpdated.textContent = dateTimeLabel(lastUpdated);
-  els.drawMeterFill.style.width = `${Math.round(coverageRatio * 100)}%`;
+  setText(
+    els.activeCount,
+    `${(state.participants || []).filter((participant) => participant.active).length} actifs`
+  );
+  setText(els.lastUpdated, dateTimeLabel(lastUpdated));
+  if (els.drawMeterFill) {
+    els.drawMeterFill.style.width = `${Math.round(coverageRatio * 100)}%`;
+  }
 
-  if (state.nextDraw.coveredByGains) {
-    els.nextDrawStatus.textContent = "Payé par nos gains";
-    els.drawMeterText.textContent = `Le prochain paiement automatique est couvert par nos gains. Le retrait passera le ${nextPaymentDateLabel()}; il restera ${money(state.nextDraw.remainderAfterPayment)} dans nos gains.`;
+  if (nextDraw.coveredByGains) {
+    setText(els.nextDrawStatus, "Payé par nos gains");
+    setText(
+      els.drawMeterText,
+      `Le prochain paiement automatique est couvert par nos gains. Le retrait passera le ${nextPaymentDateLabel()}; il restera ${money(nextDraw.remainderAfterPayment)} dans nos gains.`
+    );
   } else {
-    els.nextDrawStatus.textContent = `${money(state.nextDraw.missingAmount)} manquant`;
-    els.drawMeterText.textContent = `Il manque ${money(state.nextDraw.missingAmount)} dans nos gains pour couvrir le prochain paiement automatique. Si nos gains ne suffisent pas, un retrait de ${money(state.drawCostPerParticipant)} par participant sera appliqué le ${nextPaymentDateLabel()}.`;
+    setText(els.nextDrawStatus, `${money(nextDraw.missingAmount)} manquant`);
+    setText(
+      els.drawMeterText,
+      `Il manque ${money(nextDraw.missingAmount)} dans nos gains pour couvrir le prochain paiement automatique. Si nos gains ne suffisent pas, un retrait de ${money(state.drawCostPerParticipant)} par participant sera appliqué le ${nextPaymentDateLabel()}.`
+    );
   }
 }
 
 function renderParticipants() {
-  els.participantList.innerHTML = state.participants
+  if (!els.participantList) return;
+  els.participantList.innerHTML = (state.participants || [])
     .map((participant) => {
       const className = participant.balance < 0 ? "negative" : "positive";
       const active = participant.id === selectedId ? " active" : "";
@@ -1328,66 +1374,80 @@ function showToast(message, duration = 3000) {
 }
 
 function setToday() {
+  if (!els.dateInput) return;
   const today = new Date();
   const offset = today.getTimezoneOffset() * 60000;
   els.dateInput.value = new Date(today.getTime() - offset).toISOString().slice(0, 10);
 }
 
-els.form.addEventListener("submit", addTransaction);
-els.drawInfoForm.addEventListener("submit", updateDrawInfo);
-els.drawResultForm.addEventListener("submit", updateDrawResult);
-els.resultPhotoForm.addEventListener("submit", uploadResultPhotos);
-els.ticketPhotoForm.addEventListener("submit", uploadTicketPhotos);
-els.participantForm.addEventListener("submit", addParticipant);
-els.applyDraw.addEventListener("click", applyDraw);
-els.clearHistory.addEventListener("click", clearHistory);
-els.toggleParticipantActive.addEventListener("click", setParticipantActive);
-els.deleteParticipant.addEventListener("click", deleteParticipant);
-els.adminToggle.addEventListener("click", unlockAdmin);
-els.refreshCombinedTotal?.addEventListener("click", () =>
+on(els.form, "submit", addTransaction);
+on(els.drawInfoForm, "submit", updateDrawInfo);
+on(els.drawResultForm, "submit", updateDrawResult);
+on(els.resultPhotoForm, "submit", uploadResultPhotos);
+on(els.ticketPhotoForm, "submit", uploadTicketPhotos);
+on(els.participantForm, "submit", addParticipant);
+on(els.applyDraw, "click", applyDraw);
+on(els.clearHistory, "click", clearHistory);
+on(els.toggleParticipantActive, "click", setParticipantActive);
+on(els.deleteParticipant, "click", deleteParticipant);
+on(els.adminToggle, "click", unlockAdmin);
+on(els.refreshCombinedTotal, "click", () =>
   withButtonBusy(els.refreshCombinedTotal, "Calcul...", refreshCombinedAdminTotal));
-els.transactionType.addEventListener("change", renderSelectors);
-els.resetDemo.addEventListener("click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
-els.openResultPhotos.addEventListener("click", async () => {
-  els.resultPhotosModal.classList.remove("hidden");
-  els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+on(els.transactionType, "change", renderSelectors);
+on(els.resetDemo, "click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
+on(els.openResultPhotos, "click", async () => {
+  els.resultPhotosModal?.classList.remove("hidden");
+  if (els.resultPhotoGallery) {
+    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+  }
   await ensureResultPhotos();
 });
-els.closeResultPhotos.addEventListener("click", () => els.resultPhotosModal.classList.add("hidden"));
-els.resultPhotosModal.addEventListener("click", (event) => {
+on(els.closeResultPhotos, "click", () => els.resultPhotosModal?.classList.add("hidden"));
+on(els.resultPhotosModal, "click", (event) => {
   if (event.target === els.resultPhotosModal) {
     els.resultPhotosModal.classList.add("hidden");
   }
 });
-els.openTickets.addEventListener("click", async () => {
-  els.ticketsModal.classList.remove("hidden");
-  els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+on(els.openTickets, "click", async () => {
+  els.ticketsModal?.classList.remove("hidden");
+  if (els.ticketGallery) {
+    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+  }
   await ensureTicketPhotos();
 });
-els.closeTickets.addEventListener("click", () => els.ticketsModal.classList.add("hidden"));
-els.ticketsModal.addEventListener("click", (event) => {
+on(els.closeTickets, "click", () => els.ticketsModal?.classList.add("hidden"));
+on(els.ticketsModal, "click", (event) => {
   if (event.target === els.ticketsModal) {
     els.ticketsModal.classList.add("hidden");
   }
 });
 
-els.resetDemo.textContent = "Rafraichir";
-els.adminNote.textContent = "";
+if (els.resetDemo) els.resetDemo.textContent = "Rafraichir";
+if (els.adminNote) els.adminNote.textContent = "";
 
 setToday();
 
 // Instant first paint from last visit (while server wakes / refreshes).
 const cachedBoot = readCachedState();
-if (cachedBoot) {
-  state = cachedBoot;
-  if (!selectedId || !state.participants.some((p) => p.id === selectedId)) {
-    selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
+if (cachedBoot?.participants?.length && cachedBoot?.nextDraw) {
+  try {
+    state = cachedBoot;
+    if (!selectedId || !state.participants.some((p) => p.id === selectedId)) {
+      selectedId = state.participants.at(-1)?.id || state.participants[0]?.id;
+    }
+    render();
+    hideStartupLoading();
+    if (els.lastUpdated) {
+      els.lastUpdated.textContent = "Mise a jour en arriere-plan…";
+    }
+  } catch (error) {
+    console.error("Cache boot failed", error);
+    state = null;
+    try { localStorage.removeItem(STATE_CACHE_KEY); } catch { /* ignore */ }
+    showStartupLoading();
   }
-  render();
-  hideStartupLoading();
-  if (els.lastUpdated) {
-    els.lastUpdated.textContent = "Mise a jour en arriere-plan…";
-  }
+} else {
+  showStartupLoading();
 }
 
 loadState();
