@@ -178,11 +178,6 @@ button {
   object-fit: contain;
 }
 
-.lotto-649-logo {
-  width: 108px;
-  max-height: 64px;
-}
-
 .eyebrow {
   margin: 0 0 5px;
   color: var(--cyan);
@@ -935,6 +930,17 @@ select:focus {
   gap: 12px;
 }
 
+.ticket-card-placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 140px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9aa0b8;
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 16px;
+}
 .ticket-card {
   display: grid;
   gap: 10px;

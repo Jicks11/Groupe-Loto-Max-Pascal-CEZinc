@@ -226,9 +226,23 @@ function money(value) {
   }).format(Number(value || 0));
 }
 
+/** Local calendar YYYY-MM-DD (avoid toISOString UTC day shift). */
+function toLocalIsoDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function dateOnly(isoDate) {
+  if (!isoDate) return "";
+  return String(isoDate).slice(0, 10);
+}
+
 function dateLabel(isoDate) {
   if (!isoDate) return "Date inconnue";
-  return new Date(`${String(isoDate).slice(0, 10)}T12:00:00`).toLocaleDateString("fr-CA", {
+  return new Date(`${dateOnly(isoDate)}T12:00:00`).toLocaleDateString("fr-CA", {
     day: "numeric",
     month: "long",
     year: "numeric"
@@ -236,36 +250,52 @@ function dateLabel(isoDate) {
 }
 
 function dateInputValue(isoDate) {
-  return isoDate ? String(isoDate).slice(0, 10) : "";
+  return dateOnly(isoDate);
 }
 
 function previousDayIso(isoDate) {
   if (!isoDate) return isoDate;
-  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00`);
+  const date = new Date(`${dateOnly(isoDate)}T12:00:00`);
   if (Number.isNaN(date.getTime())) return isoDate;
   date.setDate(date.getDate() - 1);
-  return date.toISOString().slice(0, 10);
+  return toLocalIsoDate(date);
 }
 
 function previousScheduledDrawIso(referenceIso, drawDays) {
   if (!referenceIso) return "";
-  const reference = new Date(`${String(referenceIso).slice(0, 10)}T12:00:00`);
+  const reference = new Date(`${dateOnly(referenceIso)}T12:00:00`);
   if (Number.isNaN(reference.getTime())) return "";
 
   for (let offset = 1; offset <= 14; offset += 1) {
     const date = new Date(reference);
     date.setDate(reference.getDate() - offset);
     if (drawDays.includes(date.getDay())) {
-      return date.toISOString().slice(0, 10);
+      return toLocalIsoDate(date);
     }
   }
 
   return previousDayIso(referenceIso);
 }
 
+/** Loto Max: mar/ven (2,5). 6/49: mer/sam (3,6). */
+const DRAW_WEEKDAYS = APP_SCOPE === "loto-649" ? [3, 6] : [2, 5];
+
 function lastResultDefaultDateIso() {
   const nextPublicDraw = state?.prizeInfo?.drawDate || previousDayIso(state?.nextDraw?.date);
-  return previousScheduledDrawIso(nextPublicDraw, [2, 5]);
+  return previousScheduledDrawIso(nextPublicDraw, DRAW_WEEKDAYS);
+}
+
+/** Prefer dates that actually have photos, then last result, then schedule. */
+function preferredResultPhotoDate(allPhotos = []) {
+  const dates = (allPhotos || [])
+    .map((p) => dateOnly(p?.date))
+    .filter(Boolean)
+    .sort()
+    .reverse();
+  if (dates[0]) return dates[0];
+  const lastResult = dateOnly(state?.lastDrawResult?.date);
+  if (lastResult) return lastResult;
+  return dateOnly(lastResultDefaultDateIso());
 }
 
 function resultDateForDisplay(result, prizeDrawDate) {
@@ -589,29 +619,41 @@ async function loadState({ silent = false } = {}) {
   }
 }
 
-async function ensureTicketPhotos() {
+async function ensureTicketPhotos({ force = false } = {}) {
   if (!state) return;
-  if (ticketPhotosHydrated && (state.ticketPhotos || []).some((p) => p.imageDataUrl)) return;
+  const hasBytes = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
+  if (!force && ticketPhotosHydrated && hasBytes) return;
   try {
-    const data = await api("/api/ticket-photos", { timeoutMs: 60000 });
-    state.ticketPhotos = data.photos || data || [];
-    ticketPhotosHydrated = true;
+    const data = await api("/api/ticket-photos", { timeoutMs: 90000 });
+    const list = Array.isArray(data?.photos) ? data.photos : (Array.isArray(data) ? data : []);
+    state.ticketPhotos = list;
+    ticketPhotosHydrated = list.some((p) => p.imageDataUrl) || list.length === 0;
     renderTickets();
   } catch (error) {
+    ticketPhotosHydrated = false;
     showToast(`Photos des billets: ${error.message}`, 5000);
+    if (els.ticketGallery) {
+      els.ticketGallery.innerHTML = `<p class="empty-state">Impossible de charger les billets. Réessaie.</p>`;
+    }
   }
 }
 
-async function ensureResultPhotos() {
+async function ensureResultPhotos({ force = false } = {}) {
   if (!state) return;
-  if (resultPhotosHydrated && (state.resultPhotos || []).some((p) => p.imageDataUrl)) return;
+  const hasBytes = (state.resultPhotos || []).some((p) => p.imageDataUrl);
+  if (!force && resultPhotosHydrated && hasBytes) return;
   try {
-    const data = await api("/api/result-photos", { timeoutMs: 60000 });
-    state.resultPhotos = data.photos || data || [];
-    resultPhotosHydrated = true;
+    const data = await api("/api/result-photos", { timeoutMs: 90000 });
+    const list = Array.isArray(data?.photos) ? data.photos : (Array.isArray(data) ? data : []);
+    state.resultPhotos = list;
+    resultPhotosHydrated = list.some((p) => p.imageDataUrl) || list.length === 0;
     renderResultPhotos();
   } catch (error) {
+    resultPhotosHydrated = false;
     showToast(`Photos de resultat: ${error.message}`, 5000);
+    if (els.resultPhotoGallery) {
+      els.resultPhotoGallery.innerHTML = `<p class="empty-state">Impossible de charger les photos. Réessaie.</p>`;
+    }
   }
 }
 
@@ -895,20 +937,24 @@ function renderGroupHistory() {
 
 function renderResultPhotos() {
   const allPhotos = state.resultPhotos || [];
-  const latestDate = lastResultDefaultDateIso() || state.lastDrawResult?.date || allPhotos[0]?.date;
-  const photos = latestDate
-    ? allPhotos.filter((photo) => String(photo.date).slice(0, 10) === latestDate)
-    : allPhotos;
-  const visiblePhotos = photos.length ? photos : (adminUnlocked ? allPhotos : []);
-  const oldPhotoCount = allPhotos.length - photos.length;
+  const latestDate = preferredResultPhotoDate(allPhotos);
+  let photos = latestDate
+    ? allPhotos.filter((photo) => dateOnly(photo.date) === latestDate)
+    : allPhotos.slice();
+  // Never hide existing photos behind a bad date guess (was blocking the gallery).
+  if (!photos.length && allPhotos.length) photos = allPhotos.slice();
+  const visiblePhotos = photos;
+  const oldPhotoCount = Math.max(0, allPhotos.length - photos.length);
   els.resultPhotoSummary.textContent = photos.length
-    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat du ${dateLabel(latestDate)}.`
-    : latestDate
-      ? `Aucune photo du résultat du ${dateLabel(latestDate)}${adminUnlocked && oldPhotoCount > 0 ? ` (${oldPhotoCount} ancienne${oldPhotoCount > 1 ? "s" : ""})` : ""}.`
-      : "Aucune photo de résultat ajoutée pour le moment.";
-  els.openResultPhotos.disabled = visiblePhotos.length === 0;
+    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat${latestDate ? ` du ${dateLabel(latestDate)}` : ""}${oldPhotoCount > 0 ? ` · ${oldPhotoCount} plus ancienne${oldPhotoCount > 1 ? "s" : ""}` : ""}.`
+    : "Aucune photo de résultat ajoutée pour le moment.";
+  // Enable open if we have metadata OR full images (bytes may load on click).
+  els.openResultPhotos.disabled = allPhotos.length === 0;
+  const missingBytes = visiblePhotos.some((p) => !p.imageDataUrl);
   els.resultPhotoGallery.innerHTML = visiblePhotos.length
-    ? visiblePhotos.map(renderResultPhoto).join("")
+    ? (missingBytes
+      ? `<p class="empty-state">Chargement des photos…</p>${visiblePhotos.map(renderResultPhoto).join("")}`
+      : visiblePhotos.map(renderResultPhoto).join(""))
     : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
 
   els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
@@ -917,11 +963,15 @@ function renderResultPhotos() {
 }
 
 function renderResultPhoto(photo) {
+  const src = photo.imageDataUrl || "";
+  const imgBlock = src
+    ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(src)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>`
+    : `<div class="ticket-card-placeholder">Photo en cours de chargement…</div>`;
   return `
     <article class="ticket-card">
-      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>
+      ${imgBlock}
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Résultat du dernier tirage")}</small>
@@ -939,8 +989,11 @@ function renderTickets() {
     ? `${photos.length} photo${photos.length > 1 ? "s" : ""} ajoutée${photos.length > 1 ? "s" : ""}${latestDate ? ` pour le tirage du ${dateLabel(latestDate)}` : ""}.`
     : "Aucune photo ajoutée pour le moment.";
   els.openTickets.disabled = photos.length === 0;
+  const missingBytes = photos.some((p) => !p.imageDataUrl);
   els.ticketGallery.innerHTML = photos.length
-    ? photos.map(renderTicketPhoto).join("")
+    ? (missingBytes
+      ? `<p class="empty-state">Chargement des photos…</p>${photos.map(renderTicketPhoto).join("")}`
+      : photos.map(renderTicketPhoto).join(""))
     : `<p class="empty-state">Aucune photo de billet pour le moment.</p>`;
 
   els.ticketGallery.querySelectorAll("[data-delete-ticket]").forEach((button) => {
@@ -949,11 +1002,15 @@ function renderTickets() {
 }
 
 function renderTicketPhoto(photo) {
+  const src = photo.imageDataUrl || "";
+  const imgBlock = src
+    ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(src)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>`
+    : `<div class="ticket-card-placeholder">Photo en cours de chargement…</div>`;
   return `
     <article class="ticket-card">
-      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>
+      ${imgBlock}
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Photo de billet")}</small>
@@ -1399,7 +1456,8 @@ on(els.openResultPhotos, "click", async () => {
   if (els.resultPhotoGallery) {
     els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
   }
-  await ensureResultPhotos();
+  // Always force-fetch bytes (state payload is metadata-only).
+  await ensureResultPhotos({ force: true });
 });
 on(els.closeResultPhotos, "click", () => els.resultPhotosModal?.classList.add("hidden"));
 on(els.resultPhotosModal, "click", (event) => {
@@ -1412,7 +1470,7 @@ on(els.openTickets, "click", async () => {
   if (els.ticketGallery) {
     els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
   }
-  await ensureTicketPhotos();
+  await ensureTicketPhotos({ force: true });
 });
 on(els.closeTickets, "click", () => els.ticketsModal?.classList.add("hidden"));
 on(els.ticketsModal, "click", (event) => {
