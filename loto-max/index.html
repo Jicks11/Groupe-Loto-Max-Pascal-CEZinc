@@ -23,8 +23,8 @@
     <link rel="preconnect" href="https://groupe-loto-max-pascal-cezinc.onrender.com" crossorigin />
     <link rel="dns-prefetch" href="https://groupe-loto-max-pascal-cezinc.onrender.com" />
     <!-- Relative + absolute: works at /loto-max/ and on root / -->
-    <link rel="stylesheet" href="styles.css?v=20260715-ui-fix" />
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260715-ui-fix" />
+    <link rel="stylesheet" href="styles.css?v=20260716-v110" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260716-v110" />
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -53,6 +53,7 @@
 
         <div class="status-strip" aria-label="Derniere mise a jour du groupe">
           <span id="lastUpdated">Derniere mise a jour: chargement...</span>
+          <span class="app-version" id="appVersion" title="Version de l’app">v—</span>
         </div>
       </header>
 
@@ -423,6 +424,10 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/loto-max/app.js?v=20260715-fix3" defer></script>
+    <footer class="app-footer" aria-label="Version">
+      <span class="app-version app-version-footer" id="appVersionFooter">v1.1.0</span>
+    </footer>
+
+    <script src="/loto-max/app.js?v=20260716-v110" defer></script>
   </body>
 </html>

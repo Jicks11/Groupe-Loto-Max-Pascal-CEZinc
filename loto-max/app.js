@@ -1,4 +1,7 @@
 const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
+/** Discreet client build label — bump when shipping UI/API photo fixes. */
+const APP_VERSION = "1.1.0";
+const APP_VERSION_DATE = "2026-07-16";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
 const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v3`;
@@ -53,11 +56,22 @@ function cleanLegacyBrowserCache() {
 
 cleanLegacyBrowserCache();
 
+function paintAppVersion() {
+  const label = `v${APP_VERSION}`;
+  const tip = `Mise à jour ${APP_VERSION_DATE}`;
+  document.querySelectorAll("#appVersion, #appVersionFooter, .app-version").forEach((el) => {
+    el.textContent = label;
+    el.title = tip;
+    el.setAttribute("aria-label", `Version ${APP_VERSION}, mise à jour du ${APP_VERSION_DATE}`);
+  });
+}
+
 const els = {
   startupOverlay: document.querySelector("#startupOverlay"),
   startupMessage: document.querySelector("#startupMessage"),
   startupProgress: document.querySelector("#startupProgress"),
   lastUpdated: document.querySelector("#lastUpdated"),
+  appVersion: document.querySelector("#appVersion"),
   publicDrawDate: document.querySelector("#publicDrawDate"),
   jackpotAmount: document.querySelector("#jackpotAmount"),
   secondaryPrizes: document.querySelector("#secondaryPrizes"),
@@ -1482,6 +1496,7 @@ on(els.ticketsModal, "click", (event) => {
 if (els.resetDemo) els.resetDemo.textContent = "Rafraichir";
 if (els.adminNote) els.adminNote.textContent = "";
 
+paintAppVersion();
 setToday();
 
 // Wipe broken older caches once (v1/v2 could freeze the progress bar).
