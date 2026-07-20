@@ -1069,7 +1069,9 @@ public sealed class LotoStore
     {
         lock (_gate)
         {
-            var state = Load(useCache: false);
+            // useCache: true — do NOT hit Supabase every minute while Render is kept warm.
+            // Cache TTL is DatabaseRefreshInterval (5 min). Saves massive Postgres egress.
+            var state = Load(useCache: true);
             var expectedLastUpdatedAt = state.LastUpdatedAt;
             var now = LotoClock.Now;
             var today = DateOnly.FromDateTime(now.DateTime);
