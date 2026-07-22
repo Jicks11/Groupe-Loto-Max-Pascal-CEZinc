@@ -1,7 +1,4 @@
-const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
-/** Discreet client build label — bump when shipping UI/API photo fixes. */
-const APP_VERSION = "1.1.0";
-const APP_VERSION_DATE = "2026-07-16";
+﻿const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
 const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v3`;
@@ -56,22 +53,11 @@ function cleanLegacyBrowserCache() {
 
 cleanLegacyBrowserCache();
 
-function paintAppVersion() {
-  const label = `v${APP_VERSION}`;
-  const tip = `Mise à jour ${APP_VERSION_DATE}`;
-  document.querySelectorAll("#appVersion, #appVersionFooter, .app-version").forEach((el) => {
-    el.textContent = label;
-    el.title = tip;
-    el.setAttribute("aria-label", `Version ${APP_VERSION}, mise à jour du ${APP_VERSION_DATE}`);
-  });
-}
-
 const els = {
   startupOverlay: document.querySelector("#startupOverlay"),
   startupMessage: document.querySelector("#startupMessage"),
   startupProgress: document.querySelector("#startupProgress"),
   lastUpdated: document.querySelector("#lastUpdated"),
-  appVersion: document.querySelector("#appVersion"),
   publicDrawDate: document.querySelector("#publicDrawDate"),
   jackpotAmount: document.querySelector("#jackpotAmount"),
   secondaryPrizes: document.querySelector("#secondaryPrizes"),
@@ -215,7 +201,7 @@ function showStartupLoading() {
       ? 12 + (elapsed / 4000) * 50
       : Math.min(92, 62 + ((elapsed - 4000) / 15000) * 30);
     const message = elapsed > 6000
-      ? "Le serveur se reveille (Render). Patiente quelques secondes…"
+      ? "Chargement des soldes en cours. Merci de patienter…"
       : "Connexion aux donnees du groupe…";
     setStartupProgress(message, percent);
   }, 200);
@@ -240,23 +226,9 @@ function money(value) {
   }).format(Number(value || 0));
 }
 
-/** Local calendar YYYY-MM-DD (avoid toISOString UTC day shift). */
-function toLocalIsoDate(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function dateOnly(isoDate) {
-  if (!isoDate) return "";
-  return String(isoDate).slice(0, 10);
-}
-
 function dateLabel(isoDate) {
   if (!isoDate) return "Date inconnue";
-  return new Date(`${dateOnly(isoDate)}T12:00:00`).toLocaleDateString("fr-CA", {
+  return new Date(`${String(isoDate).slice(0, 10)}T12:00:00`).toLocaleDateString("fr-CA", {
     day: "numeric",
     month: "long",
     year: "numeric"
@@ -264,52 +236,36 @@ function dateLabel(isoDate) {
 }
 
 function dateInputValue(isoDate) {
-  return dateOnly(isoDate);
+  return isoDate ? String(isoDate).slice(0, 10) : "";
 }
 
 function previousDayIso(isoDate) {
   if (!isoDate) return isoDate;
-  const date = new Date(`${dateOnly(isoDate)}T12:00:00`);
+  const date = new Date(`${String(isoDate).slice(0, 10)}T12:00:00`);
   if (Number.isNaN(date.getTime())) return isoDate;
   date.setDate(date.getDate() - 1);
-  return toLocalIsoDate(date);
+  return date.toISOString().slice(0, 10);
 }
 
 function previousScheduledDrawIso(referenceIso, drawDays) {
   if (!referenceIso) return "";
-  const reference = new Date(`${dateOnly(referenceIso)}T12:00:00`);
+  const reference = new Date(`${String(referenceIso).slice(0, 10)}T12:00:00`);
   if (Number.isNaN(reference.getTime())) return "";
 
   for (let offset = 1; offset <= 14; offset += 1) {
     const date = new Date(reference);
     date.setDate(reference.getDate() - offset);
     if (drawDays.includes(date.getDay())) {
-      return toLocalIsoDate(date);
+      return date.toISOString().slice(0, 10);
     }
   }
 
   return previousDayIso(referenceIso);
 }
 
-/** Loto Max: mar/ven (2,5). 6/49: mer/sam (3,6). */
-const DRAW_WEEKDAYS = APP_SCOPE === "loto-649" ? [3, 6] : [2, 5];
-
 function lastResultDefaultDateIso() {
   const nextPublicDraw = state?.prizeInfo?.drawDate || previousDayIso(state?.nextDraw?.date);
-  return previousScheduledDrawIso(nextPublicDraw, DRAW_WEEKDAYS);
-}
-
-/** Prefer dates that actually have photos, then last result, then schedule. */
-function preferredResultPhotoDate(allPhotos = []) {
-  const dates = (allPhotos || [])
-    .map((p) => dateOnly(p?.date))
-    .filter(Boolean)
-    .sort()
-    .reverse();
-  if (dates[0]) return dates[0];
-  const lastResult = dateOnly(state?.lastDrawResult?.date);
-  if (lastResult) return lastResult;
-  return dateOnly(lastResultDefaultDateIso());
+  return previousScheduledDrawIso(nextPublicDraw, [2, 5]);
 }
 
 function resultDateForDisplay(result, prizeDrawDate) {
@@ -623,7 +579,7 @@ async function loadState({ silent = false } = {}) {
         hideStartupLoading();
       } else {
         showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
-        setStartupProgress("Le service de donnees se reveille. Nouvel essai dans 2 secondes…", 88);
+        setStartupProgress("Connexion en cours. Nouvel essai dans 2 secondes…", 88);
         window.clearTimeout(startupRetryTimer);
         startupRetryTimer = window.setTimeout(() => loadState(), 2000);
       }
@@ -633,41 +589,29 @@ async function loadState({ silent = false } = {}) {
   }
 }
 
-async function ensureTicketPhotos({ force = false } = {}) {
+async function ensureTicketPhotos() {
   if (!state) return;
-  const hasBytes = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
-  if (!force && ticketPhotosHydrated && hasBytes) return;
+  if (ticketPhotosHydrated && (state.ticketPhotos || []).some((p) => p.imageDataUrl)) return;
   try {
-    const data = await api("/api/ticket-photos", { timeoutMs: 90000 });
-    const list = Array.isArray(data?.photos) ? data.photos : (Array.isArray(data) ? data : []);
-    state.ticketPhotos = list;
-    ticketPhotosHydrated = list.some((p) => p.imageDataUrl) || list.length === 0;
+    const data = await api("/api/ticket-photos", { timeoutMs: 60000 });
+    state.ticketPhotos = data.photos || data || [];
+    ticketPhotosHydrated = true;
     renderTickets();
   } catch (error) {
-    ticketPhotosHydrated = false;
     showToast(`Photos des billets: ${error.message}`, 5000);
-    if (els.ticketGallery) {
-      els.ticketGallery.innerHTML = `<p class="empty-state">Impossible de charger les billets. Réessaie.</p>`;
-    }
   }
 }
 
-async function ensureResultPhotos({ force = false } = {}) {
+async function ensureResultPhotos() {
   if (!state) return;
-  const hasBytes = (state.resultPhotos || []).some((p) => p.imageDataUrl);
-  if (!force && resultPhotosHydrated && hasBytes) return;
+  if (resultPhotosHydrated && (state.resultPhotos || []).some((p) => p.imageDataUrl)) return;
   try {
-    const data = await api("/api/result-photos", { timeoutMs: 90000 });
-    const list = Array.isArray(data?.photos) ? data.photos : (Array.isArray(data) ? data : []);
-    state.resultPhotos = list;
-    resultPhotosHydrated = list.some((p) => p.imageDataUrl) || list.length === 0;
+    const data = await api("/api/result-photos", { timeoutMs: 60000 });
+    state.resultPhotos = data.photos || data || [];
+    resultPhotosHydrated = true;
     renderResultPhotos();
   } catch (error) {
-    resultPhotosHydrated = false;
     showToast(`Photos de resultat: ${error.message}`, 5000);
-    if (els.resultPhotoGallery) {
-      els.resultPhotoGallery.innerHTML = `<p class="empty-state">Impossible de charger les photos. Réessaie.</p>`;
-    }
   }
 }
 
@@ -951,24 +895,20 @@ function renderGroupHistory() {
 
 function renderResultPhotos() {
   const allPhotos = state.resultPhotos || [];
-  const latestDate = preferredResultPhotoDate(allPhotos);
-  let photos = latestDate
-    ? allPhotos.filter((photo) => dateOnly(photo.date) === latestDate)
-    : allPhotos.slice();
-  // Never hide existing photos behind a bad date guess (was blocking the gallery).
-  if (!photos.length && allPhotos.length) photos = allPhotos.slice();
-  const visiblePhotos = photos;
-  const oldPhotoCount = Math.max(0, allPhotos.length - photos.length);
+  const latestDate = lastResultDefaultDateIso() || state.lastDrawResult?.date || allPhotos[0]?.date;
+  const photos = latestDate
+    ? allPhotos.filter((photo) => String(photo.date).slice(0, 10) === latestDate)
+    : allPhotos;
+  const visiblePhotos = photos.length ? photos : (adminUnlocked ? allPhotos : []);
+  const oldPhotoCount = allPhotos.length - photos.length;
   els.resultPhotoSummary.textContent = photos.length
-    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat${latestDate ? ` du ${dateLabel(latestDate)}` : ""}${oldPhotoCount > 0 ? ` · ${oldPhotoCount} plus ancienne${oldPhotoCount > 1 ? "s" : ""}` : ""}.`
-    : "Aucune photo de résultat ajoutée pour le moment.";
-  // Enable open if we have metadata OR full images (bytes may load on click).
-  els.openResultPhotos.disabled = allPhotos.length === 0;
-  const missingBytes = visiblePhotos.some((p) => !p.imageDataUrl);
+    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat du ${dateLabel(latestDate)}.`
+    : latestDate
+      ? `Aucune photo du résultat du ${dateLabel(latestDate)}${adminUnlocked && oldPhotoCount > 0 ? ` (${oldPhotoCount} ancienne${oldPhotoCount > 1 ? "s" : ""})` : ""}.`
+      : "Aucune photo de résultat ajoutée pour le moment.";
+  els.openResultPhotos.disabled = visiblePhotos.length === 0;
   els.resultPhotoGallery.innerHTML = visiblePhotos.length
-    ? (missingBytes
-      ? `<p class="empty-state">Chargement des photos…</p>${visiblePhotos.map(renderResultPhoto).join("")}`
-      : visiblePhotos.map(renderResultPhoto).join(""))
+    ? visiblePhotos.map(renderResultPhoto).join("")
     : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
 
   els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
@@ -977,15 +917,11 @@ function renderResultPhotos() {
 }
 
 function renderResultPhoto(photo) {
-  const src = photo.imageDataUrl || "";
-  const imgBlock = src
-    ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(src)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>`
-    : `<div class="ticket-card-placeholder">Photo en cours de chargement…</div>`;
   return `
     <article class="ticket-card">
-      ${imgBlock}
+      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Résultat du dernier tirage")}</small>
@@ -1003,11 +939,8 @@ function renderTickets() {
     ? `${photos.length} photo${photos.length > 1 ? "s" : ""} ajoutée${photos.length > 1 ? "s" : ""}${latestDate ? ` pour le tirage du ${dateLabel(latestDate)}` : ""}.`
     : "Aucune photo ajoutée pour le moment.";
   els.openTickets.disabled = photos.length === 0;
-  const missingBytes = photos.some((p) => !p.imageDataUrl);
   els.ticketGallery.innerHTML = photos.length
-    ? (missingBytes
-      ? `<p class="empty-state">Chargement des photos…</p>${photos.map(renderTicketPhoto).join("")}`
-      : photos.map(renderTicketPhoto).join(""))
+    ? photos.map(renderTicketPhoto).join("")
     : `<p class="empty-state">Aucune photo de billet pour le moment.</p>`;
 
   els.ticketGallery.querySelectorAll("[data-delete-ticket]").forEach((button) => {
@@ -1016,15 +949,11 @@ function renderTickets() {
 }
 
 function renderTicketPhoto(photo) {
-  const src = photo.imageDataUrl || "";
-  const imgBlock = src
-    ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(src)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>`
-    : `<div class="ticket-card-placeholder">Photo en cours de chargement…</div>`;
   return `
     <article class="ticket-card">
-      ${imgBlock}
+      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Photo de billet")}</small>
@@ -1470,8 +1399,7 @@ on(els.openResultPhotos, "click", async () => {
   if (els.resultPhotoGallery) {
     els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
   }
-  // Always force-fetch bytes (state payload is metadata-only).
-  await ensureResultPhotos({ force: true });
+  await ensureResultPhotos();
 });
 on(els.closeResultPhotos, "click", () => els.resultPhotosModal?.classList.add("hidden"));
 on(els.resultPhotosModal, "click", (event) => {
@@ -1484,7 +1412,7 @@ on(els.openTickets, "click", async () => {
   if (els.ticketGallery) {
     els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
   }
-  await ensureTicketPhotos({ force: true });
+  await ensureTicketPhotos();
 });
 on(els.closeTickets, "click", () => els.ticketsModal?.classList.add("hidden"));
 on(els.ticketsModal, "click", (event) => {
@@ -1496,7 +1424,6 @@ on(els.ticketsModal, "click", (event) => {
 if (els.resetDemo) els.resetDemo.textContent = "Rafraichir";
 if (els.adminNote) els.adminNote.textContent = "";
 
-paintAppVersion();
 setToday();
 
 // Wipe broken older caches once (v1/v2 could freeze the progress bar).

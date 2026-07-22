@@ -3,8 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#061226" />
+    <meta name="theme-color" content="#c8102e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="6/49" />
+    <meta name="application-name" content="6/49" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Famille Taillefer — Loto 6/49" />
     <title>Famille Taillefer - 6/49</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="manifest" href="/loto-649/manifest.webmanifest" />
+    <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/loto-649/assets/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="assets/favicon-16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" sizes="180x180" />
+    <link rel="apple-touch-icon" href="/loto-649/assets/apple-touch-icon.png" sizes="180x180" />
+    <link rel="icon" href="assets/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="icon" href="assets/icon-512.png" type="image/png" sizes="512x512" />
     <style>
       html, body {
         margin: 0;
@@ -21,8 +36,8 @@
     </style>
     <link rel="preconnect" href="https://groupe-loto-max-pascal-cezinc.onrender.com" crossorigin />
     <link rel="dns-prefetch" href="https://groupe-loto-max-pascal-cezinc.onrender.com" />
-    <link rel="stylesheet" href="styles.css?v=20260716-v110" />
-    <link rel="stylesheet" href="/loto-649/styles.css?v=20260716-v110" />
+    <link rel="stylesheet" href="styles.css?v=20260722-pwa" />
+    <link rel="stylesheet" href="/loto-649/styles.css?v=20260722-pwa" />
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -55,7 +70,6 @@
 
         <div class="status-strip" aria-label="Derniere mise a jour du groupe">
           <span id="lastUpdated">Derniere mise a jour: chargement...</span>
-          <span class="app-version" id="appVersion" title="Version de l’app">v—</span>
         </div>
       </header>
 
@@ -426,10 +440,15 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <footer class="app-footer" aria-label="Version">
-      <span class="app-version app-version-footer" id="appVersionFooter">v1.1.0</span>
-    </footer>
-
-    <script src="/loto-649/app.js?v=20260716-v110" defer></script>
+    <script src="app.js?v=20260722-pwa" defer></script>
+    <script src="/loto-649/app.js?v=20260722-pwa" defer></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          var sw = location.pathname.indexOf("/loto-649") === 0 ? "/loto-649/sw.js" : "./sw.js";
+          navigator.serviceWorker.register(sw).catch(function () {});
+        });
+      }
+    </script>
   </body>
 </html>
