@@ -1,5 +1,5 @@
-/* Service worker — installation écran d'accueil Loto Max */
-const CACHE = "loto-max-shell-v1";
+﻿/* Service worker — installation ecran d accueil Loto Max */
+const CACHE = "loto-max-shell-v2";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

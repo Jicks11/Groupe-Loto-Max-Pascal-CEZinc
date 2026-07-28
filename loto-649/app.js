@@ -1,9 +1,10 @@
-﻿const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
+const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
 const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v3`;
 const REFRESH_INTERVAL_MS = 30000;
-const API_TIMEOUT_MS = 15000;
+const API_TIMEOUT_MS = 20000;
+let loadFailureCount = 0;
 const RENDER_API_ORIGIN = "https://groupe-loto-max-pascal-cezinc.onrender.com";
 const LOCAL_HOSTS = new Set(["", "localhost", "127.0.0.1"]);
 const host = window.location.hostname.toLowerCase();
@@ -543,6 +544,7 @@ async function loadState({ silent = false } = {}) {
 
     const previous = state;
     state = await api("/api/state", { timeoutMs: 60000 });
+    loadFailureCount = 0;
     // Keep already-hydrated photo bytes when /state returns metadata only.
     if (previous?.ticketPhotos?.some((p) => p.imageDataUrl) && state.ticketPhotos) {
       const map = new Map(previous.ticketPhotos.map((p) => [p.id, p.imageDataUrl]));
@@ -577,11 +579,30 @@ async function loadState({ silent = false } = {}) {
       if (state) {
         showToast(`Mise a jour en cours: ${error.message}`, 4000);
         hideStartupLoading();
-      } else {
-        showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
-        setStartupProgress("Connexion en cours. Nouvel essai dans 2 secondes…", 88);
-        window.clearTimeout(startupRetryTimer);
-        startupRetryTimer = window.setTimeout(() => loadState(), 2000);
+            } else {
+        loadFailureCount += 1;
+        if (loadFailureCount >= 4) {
+          const cached = readCachedState();
+          if (cached?.participants?.length) {
+            try {
+              state = cached;
+              render();
+              showToast("Mode cache — serveur lent. Rafraichis plus tard.", 5000);
+            } catch {
+              /* ignore */
+            }
+          } else {
+            showToast(`Serveur indisponible: ${error.message}. Reessaie dans 1 min.`, 8000);
+            setText(els.lastUpdated, "Hors ligne — reessaie plus tard.");
+          }
+          hideStartupLoading();
+          loadFailureCount = 0;
+        } else {
+          showToast(`Impossible de charger les donnees: ${error.message}`, 4000);
+          setStartupProgress(`Connexion… essai ${loadFailureCount}/4`, 88);
+          window.clearTimeout(startupRetryTimer);
+          startupRetryTimer = window.setTimeout(() => loadState(), 2500);
+        }
       }
     }
   } finally {
