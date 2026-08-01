@@ -151,6 +151,12 @@ let combinedTotalLoading = false;
 let combinedTotalError = "";
 let ticketPhotosHydrated = false;
 let resultPhotosHydrated = false;
+let ticketPhotosLoading = false;
+let resultPhotosLoading = false;
+let ticketPhotosError = "";
+let resultPhotosError = "";
+let ticketPhotosPromise = null;
+let resultPhotosPromise = null;
 
 function readCachedState() {
   try {
@@ -558,8 +564,8 @@ async function loadState({ silent = false } = {}) {
         p.imageDataUrl ? p : { ...p, imageDataUrl: map.get(p.id) || "" }
       ));
     }
-    ticketPhotosHydrated = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
-    resultPhotosHydrated = (state.resultPhotos || []).some((p) => p.imageDataUrl);
+    ticketPhotosHydrated = photosHaveBytes(state.ticketPhotos);
+    resultPhotosHydrated = photosHaveBytes(state.resultPhotos);
     if (!selectedId || !(state.participants || []).some((participant) => participant.id === selectedId)) {
       selectedId = state.participants?.at(-1)?.id || state.participants?.[0]?.id;
     }
@@ -573,7 +579,10 @@ async function loadState({ silent = false } = {}) {
     if (adminUnlocked) {
       refreshCombinedAdminTotal();
     }
-    if (!silent) hideStartupLoading();
+    if (!silent) {
+      hideStartupLoading();
+      prefetchPhotosInBackground();
+    }
   } catch (error) {
     if (!silent) {
       if (state) {
@@ -610,30 +619,146 @@ async function loadState({ silent = false } = {}) {
   }
 }
 
-async function ensureTicketPhotos() {
-  if (!state) return;
-  if (ticketPhotosHydrated && (state.ticketPhotos || []).some((p) => p.imageDataUrl)) return;
-  try {
-    const data = await api("/api/ticket-photos", { timeoutMs: 60000 });
-    state.ticketPhotos = data.photos || data || [];
-    ticketPhotosHydrated = true;
-    renderTickets();
-  } catch (error) {
-    showToast(`Photos des billets: ${error.message}`, 5000);
-  }
+function photoHasBytes(photo) {
+  return typeof photo?.imageDataUrl === "string" && photo.imageDataUrl.startsWith("data:image");
 }
 
-async function ensureResultPhotos() {
-  if (!state) return;
-  if (resultPhotosHydrated && (state.resultPhotos || []).some((p) => p.imageDataUrl)) return;
-  try {
-    const data = await api("/api/result-photos", { timeoutMs: 60000 });
-    state.resultPhotos = data.photos || data || [];
-    resultPhotosHydrated = true;
-    renderResultPhotos();
-  } catch (error) {
-    showToast(`Photos de resultat: ${error.message}`, 5000);
+function photosHaveBytes(photos) {
+  return (photos || []).some(photoHasBytes);
+}
+
+function photosNeedBytes(photos) {
+  const list = photos || [];
+  if (!list.length) return false;
+  return list.some((p) => !photoHasBytes(p));
+}
+
+async function apiWithRetry(path, { timeoutMs = 90000, attempts = 4 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await api(path, { timeoutMs });
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        // Backoff: ~0.8s, 2.4s, 4.8s — helps with Render free-tier blips.
+        await wait(800 * attempt * attempt);
+      }
+    }
   }
+  throw lastError || new Error("Echec reseau.");
+}
+
+/**
+ * Load ticket photo bytes (lazy). Safe to call repeatedly:
+ * - re-renders if already in memory (fixes "Chargement…" stuck on reopen)
+ * - retries on network failure
+ * - de-dupes concurrent calls
+ */
+async function ensureTicketPhotos({ force = false } = {}) {
+  if (!state) return false;
+
+  if (!force && ticketPhotosHydrated && photosHaveBytes(state.ticketPhotos)) {
+    ticketPhotosError = "";
+    renderTickets();
+    return true;
+  }
+
+  // Metadata says empty — nothing to fetch.
+  if (!force && !(state.ticketPhotos || []).length && ticketPhotosHydrated) {
+    renderTickets();
+    return true;
+  }
+
+  if (ticketPhotosPromise) return ticketPhotosPromise;
+
+  ticketPhotosLoading = true;
+  ticketPhotosError = "";
+  renderTickets();
+
+  ticketPhotosPromise = (async () => {
+    try {
+      const data = await apiWithRetry("/api/ticket-photos", { timeoutMs: 90000, attempts: 4 });
+      const photos = data?.photos ?? data ?? [];
+      state.ticketPhotos = Array.isArray(photos) ? photos : [];
+      ticketPhotosHydrated = true;
+      ticketPhotosError = "";
+      renderTickets();
+      return true;
+    } catch (error) {
+      ticketPhotosHydrated = false;
+      ticketPhotosError = error?.message || "Erreur de chargement";
+      renderTickets();
+      showToast(`Photos des billets: ${ticketPhotosError}`, 5000);
+      return false;
+    } finally {
+      ticketPhotosLoading = false;
+      ticketPhotosPromise = null;
+    }
+  })();
+
+  return ticketPhotosPromise;
+}
+
+async function ensureResultPhotos({ force = false } = {}) {
+  if (!state) return false;
+
+  if (!force && resultPhotosHydrated && photosHaveBytes(state.resultPhotos)) {
+    resultPhotosError = "";
+    renderResultPhotos();
+    return true;
+  }
+
+  if (!force && !(state.resultPhotos || []).length && resultPhotosHydrated) {
+    renderResultPhotos();
+    return true;
+  }
+
+  if (resultPhotosPromise) return resultPhotosPromise;
+
+  resultPhotosLoading = true;
+  resultPhotosError = "";
+  renderResultPhotos();
+
+  resultPhotosPromise = (async () => {
+    try {
+      const data = await apiWithRetry("/api/result-photos", { timeoutMs: 90000, attempts: 4 });
+      const photos = data?.photos ?? data ?? [];
+      state.resultPhotos = Array.isArray(photos) ? photos : [];
+      resultPhotosHydrated = true;
+      resultPhotosError = "";
+      renderResultPhotos();
+      return true;
+    } catch (error) {
+      resultPhotosHydrated = false;
+      resultPhotosError = error?.message || "Erreur de chargement";
+      renderResultPhotos();
+      showToast(`Photos de resultat: ${resultPhotosError}`, 5000);
+      return false;
+    } finally {
+      resultPhotosLoading = false;
+      resultPhotosPromise = null;
+    }
+  })();
+
+  return resultPhotosPromise;
+}
+
+/** Warm photo endpoints after first paint so opening the modal is instant. */
+function prefetchPhotosInBackground() {
+  if (!state) return;
+  window.setTimeout(() => {
+    try {
+      if ((state.ticketPhotos || []).length && !photosHaveBytes(state.ticketPhotos) && !ticketPhotosLoading) {
+        ensureTicketPhotos().catch(() => {});
+      }
+      if ((state.resultPhotos || []).length && !photosHaveBytes(state.resultPhotos) && !resultPhotosLoading) {
+        ensureResultPhotos().catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
+  }, 1200);
 }
 
 function getAdminPin() {
@@ -927,9 +1052,34 @@ function renderResultPhotos() {
     : latestDate
       ? `Aucune photo du résultat du ${dateLabel(latestDate)}${adminUnlocked && oldPhotoCount > 0 ? ` (${oldPhotoCount} ancienne${oldPhotoCount > 1 ? "s" : ""})` : ""}.`
       : "Aucune photo de résultat ajoutée pour le moment.";
+  // Keep button enabled when metadata exists (bytes load on open).
   els.openResultPhotos.disabled = visiblePhotos.length === 0;
-  els.resultPhotoGallery.innerHTML = visiblePhotos.length
-    ? visiblePhotos.map(renderResultPhoto).join("")
+
+  if (!els.resultPhotoGallery) return;
+
+  // Don't wipe a successful gallery during silent refresh if we already have bytes.
+  const readyPhotos = visiblePhotos.filter(photoHasBytes);
+  if (resultPhotosLoading && !readyPhotos.length) {
+    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…<br><small>Gros fichiers, ça peut prendre quelques secondes.</small></p>`;
+    return;
+  }
+  if (resultPhotosError && !readyPhotos.length && visiblePhotos.length) {
+    els.resultPhotoGallery.innerHTML = `
+      <p class="empty-state">Impossible de charger les photos.<br><small>${escapeHtml(resultPhotosError)}</small></p>
+      <button class="accent-button compact-button" type="button" id="retryResultPhotos">Réessayer</button>`;
+    els.resultPhotoGallery.querySelector("#retryResultPhotos")?.addEventListener("click", () => {
+      ensureResultPhotos({ force: true });
+    });
+    return;
+  }
+  if (visiblePhotos.length && !readyPhotos.length && photosNeedBytes(visiblePhotos)) {
+    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+    return;
+  }
+
+  const toShow = readyPhotos.length ? readyPhotos : visiblePhotos;
+  els.resultPhotoGallery.innerHTML = toShow.length
+    ? toShow.map(renderResultPhoto).join("")
     : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
 
   els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
@@ -938,11 +1088,14 @@ function renderResultPhotos() {
 }
 
 function renderResultPhoto(photo) {
+  const src = photoHasBytes(photo) ? photo.imageDataUrl : "";
   return `
     <article class="ticket-card">
-      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>
+      ${src
+        ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(src)}" alt="Résultat du ${dateLabel(photo.date)}" loading="eager" decoding="async" />
+      </a>`
+        : `<div class="empty-state">Image non chargée</div>`}
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Résultat du dernier tirage")}</small>
@@ -960,8 +1113,31 @@ function renderTickets() {
     ? `${photos.length} photo${photos.length > 1 ? "s" : ""} ajoutée${photos.length > 1 ? "s" : ""}${latestDate ? ` pour le tirage du ${dateLabel(latestDate)}` : ""}.`
     : "Aucune photo ajoutée pour le moment.";
   els.openTickets.disabled = photos.length === 0;
-  els.ticketGallery.innerHTML = photos.length
-    ? photos.map(renderTicketPhoto).join("")
+
+  if (!els.ticketGallery) return;
+
+  const readyPhotos = photos.filter(photoHasBytes);
+  if (ticketPhotosLoading && !readyPhotos.length) {
+    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…<br><small>Gros fichiers, ça peut prendre quelques secondes.</small></p>`;
+    return;
+  }
+  if (ticketPhotosError && !readyPhotos.length && photos.length) {
+    els.ticketGallery.innerHTML = `
+      <p class="empty-state">Impossible de charger les photos.<br><small>${escapeHtml(ticketPhotosError)}</small></p>
+      <button class="accent-button compact-button" type="button" id="retryTicketPhotos">Réessayer</button>`;
+    els.ticketGallery.querySelector("#retryTicketPhotos")?.addEventListener("click", () => {
+      ensureTicketPhotos({ force: true });
+    });
+    return;
+  }
+  if (photos.length && !readyPhotos.length && photosNeedBytes(photos)) {
+    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+    return;
+  }
+
+  const toShow = readyPhotos.length ? readyPhotos : photos;
+  els.ticketGallery.innerHTML = toShow.length
+    ? toShow.map(renderTicketPhoto).join("")
     : `<p class="empty-state">Aucune photo de billet pour le moment.</p>`;
 
   els.ticketGallery.querySelectorAll("[data-delete-ticket]").forEach((button) => {
@@ -970,11 +1146,14 @@ function renderTickets() {
 }
 
 function renderTicketPhoto(photo) {
+  const src = photoHasBytes(photo) ? photo.imageDataUrl : "";
   return `
     <article class="ticket-card">
-      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>
+      ${src
+        ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(src)}" alt="Billet du ${dateLabel(photo.date)}" loading="eager" decoding="async" />
+      </a>`
+        : `<div class="empty-state">Image non chargée</div>`}
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Photo de billet")}</small>
@@ -1417,9 +1596,7 @@ on(els.transactionType, "change", renderSelectors);
 on(els.resetDemo, "click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
 on(els.openResultPhotos, "click", async () => {
   els.resultPhotosModal?.classList.remove("hidden");
-  if (els.resultPhotoGallery) {
-    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
-  }
+  // ensureResultPhotos always re-renders (even when bytes are already in memory).
   await ensureResultPhotos();
 });
 on(els.closeResultPhotos, "click", () => els.resultPhotosModal?.classList.add("hidden"));
@@ -1430,9 +1607,6 @@ on(els.resultPhotosModal, "click", (event) => {
 });
 on(els.openTickets, "click", async () => {
   els.ticketsModal?.classList.remove("hidden");
-  if (els.ticketGallery) {
-    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
-  }
   await ensureTicketPhotos();
 });
 on(els.closeTickets, "click", () => els.ticketsModal?.classList.add("hidden"));
