@@ -178,11 +178,6 @@ button {
   object-fit: contain;
 }
 
-.lotto-649-logo {
-  width: 108px;
-  max-height: 64px;
-}
-
 .eyebrow {
   margin: 0 0 5px;
   color: var(--cyan);
@@ -645,6 +640,17 @@ small {
   margin: 0;
   color: var(--text);
   font-size: 1.02rem;
+}
+
+.admin-hint {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(126, 232, 255, 0.22);
+  background: rgba(14, 141, 255, 0.1);
+  color: #d7f4ff;
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 .admin-divider {

@@ -263,9 +263,22 @@ function previousScheduledDrawIso(referenceIso, drawDays) {
   return previousDayIso(referenceIso);
 }
 
+function groupDrawWeekdays() {
+  const nameToDay = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6
+  };
+  const fromState = (state?.deductionDays || [])
+    .map((name) => nameToDay[String(name).toLowerCase()])
+    .filter((day) => Number.isInteger(day));
+  if (fromState.length) return fromState;
+  // Fallback: Lotto Max mar/ven ; 6/49 jeu/dim (jours de retraits du groupe)
+  return APP_SCOPE === "loto-649" ? [4, 0] : [2, 5];
+}
+
 function lastResultDefaultDateIso() {
   const nextPublicDraw = state?.prizeInfo?.drawDate || previousDayIso(state?.nextDraw?.date);
-  return previousScheduledDrawIso(nextPublicDraw, [2, 5]);
+  return previousScheduledDrawIso(nextPublicDraw, groupDrawWeekdays());
 }
 
 /** Date du formulaire "résultat" : récente si mise à jour aujourd'hui, sinon dernier tirage passé. */
