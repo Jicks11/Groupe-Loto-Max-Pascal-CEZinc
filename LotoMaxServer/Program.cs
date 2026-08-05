@@ -875,16 +875,18 @@ public sealed class LotoStore
             // Si aucune date n'est fournie, utiliser le dernier tirage public passé (pas une vieille date figée).
             var drawDate = request.Date ?? LastCompletedPublicDrawDate(state, LotoClock.Now);
             var now = LotoClock.Now;
+            // Par défaut on AJOUTE aux gains. replacePrevious=true = corriger le dernier résultat (retrait de l'ancien).
+            var replacePrevious = request.ReplacePrevious == true;
 
-            if (!string.IsNullOrWhiteSpace(state.LastDrawResult.TransactionId))
+            if (replacePrevious && !string.IsNullOrWhiteSpace(state.LastDrawResult.TransactionId))
             {
                 state.Transactions.RemoveAll(transaction => transaction.Id == state.LastDrawResult.TransactionId);
             }
 
-            string? transactionId = null;
+            string? transactionId = state.LastDrawResult.TransactionId;
             if (amount > 0)
             {
-                // Nouvel id à chaque mise à jour pour éviter les collisions et marquer le mouvement comme récent.
+                // Toujours un nouvel id pour que le gain s'additionne (sauf si replace a retiré l'ancien).
                 transactionId = $"result-{drawDate:yyyyMMdd}-{Guid.NewGuid():N}";
 
                 state.Transactions.Insert(0, new LotoTransaction(
@@ -893,10 +895,14 @@ public sealed class LotoStore
                     "gain",
                     null,
                     amount,
-                    "Resultat du dernier tirage",
+                    replacePrevious ? "Resultat du dernier tirage (corrige)" : "Gain du tirage",
                     "Gain du tirage",
                     DrawResultMeta(bonusEntries, note),
                     now));
+            }
+            else if (replacePrevious)
+            {
+                transactionId = null;
             }
 
             state = state with
@@ -2859,7 +2865,13 @@ public sealed record DrawRequest(DateOnly? Date, string? AdminPin);
 
 public sealed record DrawInfoRequest(string? JackpotAmount, string? SecondaryPrizes, string? AdminPin);
 
-public sealed record DrawResultRequest(DateOnly? Date, decimal? Amount, int? BonusEntries, string? Note, string? AdminPin);
+public sealed record DrawResultRequest(
+    DateOnly? Date,
+    decimal? Amount,
+    int? BonusEntries,
+    string? Note,
+    string? AdminPin,
+    bool? ReplacePrevious);
 
 public sealed record TicketPhotoRequest(DateOnly? Date, string? ImageDataUrl, string? Note, string? AdminPin);
 

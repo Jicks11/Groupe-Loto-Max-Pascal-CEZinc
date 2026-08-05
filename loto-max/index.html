@@ -38,8 +38,8 @@
     <link rel="preconnect" href="https://groupe-loto-max-pascal-cezinc.onrender.com" crossorigin />
     <link rel="dns-prefetch" href="https://groupe-loto-max-pascal-cezinc.onrender.com" />
     <!-- Relative + absolute: works at /loto-max/ and on root / -->
-    <link rel="stylesheet" href="styles.css?v=20260805-gain-fix" />
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260805-gain-fix" />
+    <link rel="stylesheet" href="styles.css?v=20260805-gain-add" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260805-gain-add" />
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -266,11 +266,10 @@
               <div class="admin-divider" aria-hidden="true"></div>
 
               <form class="admin-form participant-admin-form" id="drawResultForm">
-                <h3>R&eacute;sultat du dernier tirage</h3>
+                <h3>R&eacute;sultat / gain du tirage</h3>
                 <p class="admin-hint">
-                  Remplace le r&eacute;sultat pr&eacute;c&eacute;dent (ne s&rsquo;additionne pas si tu r&eacute;-enregistres le m&ecirc;me).
-                  Pour un gain en plus, utilise Action → <strong>Gain du groupe</strong>.
-                  V&eacute;rifie la <strong>date du tirage</strong> (pas une vieille date).
+                  <strong>Ajouter aux gains</strong> = le montant s&rsquo;additionne dans &laquo; Nos gains &raquo; et le prochain paiement.
+                  Utilise <strong>Corriger</strong> seulement pour remplacer une erreur sur le dernier r&eacute;sultat (ne s&rsquo;additionne pas).
                 </p>
 
                 <div class="form-row">
@@ -280,7 +279,7 @@
                   </label>
                   <label>
                     Montant gagn&eacute;
-                    <input id="resultAmountInput" type="number" step="0.01" min="0" value="0" />
+                    <input id="resultAmountInput" type="number" step="0.01" min="0" value="0" inputmode="decimal" />
                   </label>
                 </div>
 
@@ -291,10 +290,13 @@
 
                 <label>
                   Note
-                  <input id="resultNoteInput" type="text" maxlength="140" placeholder="Ex: 45$ + 5 participations gratuites" />
+                  <input id="resultNoteInput" type="text" maxlength="140" placeholder="Ex: 20$ lot secondaire" />
                 </label>
 
-                <button class="accent-button" type="submit">Mettre &agrave; jour le r&eacute;sultat</button>
+                <div class="button-row">
+                  <button class="primary-button" type="submit" id="addResultGain" name="mode" value="add">Ajouter aux gains (+)</button>
+                  <button class="accent-button" type="button" id="replaceResultGain">Corriger (remplace)</button>
+                </div>
               </form>
 
               <div class="admin-divider" aria-hidden="true"></div>
@@ -443,8 +445,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="app.js?v=20260805-gain-fix" defer></script>
-    <script src="/loto-max/app.js?v=20260805-gain-fix" defer></script>
+    <script src="app.js?v=20260805-gain-add" defer></script>
+    <script src="/loto-max/app.js?v=20260805-gain-add" defer></script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", function () {

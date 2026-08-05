@@ -1004,11 +1004,16 @@ async function addTransaction(event) {
     "Enregistre",
     async () => {
       try {
+        const amount = parseMoneyInput(els.amountInput.value);
+        if (!Number.isFinite(amount) || amount === 0) {
+          throw new Error("Montant invalide.");
+        }
+        const previousWins = Number(state?.groupWins || 0);
         const body = {
           type: els.transactionType.value,
           participantId: els.transactionType.value === "gain" ? null : els.participantSelect.value,
-          amount: Number(els.amountInput.value),
-          date: els.dateInput.value,
+          amount,
+          date: els.dateInput.value || new Date().toISOString().slice(0, 10),
           paymentMode: els.paymentMode.value,
           note: els.noteInput.value.trim(),
           adminPin: getAdminPin()
@@ -1027,7 +1032,12 @@ async function addTransaction(event) {
         els.noteInput.value = "";
         render();
         if (body.type === "gain") {
-          showToast(`Gain de ${money(body.amount)} enregistré. Nos gains: ${money(state.groupWins)}.`);
+          const newWins = Number(state.groupWins || 0);
+          const delta = newWins - previousWins;
+          showToast(
+            `Gain de ${money(body.amount)} enregistré. Nos gains: ${money(previousWins)} → ${money(newWins)}` +
+              (delta === 0 ? " (aucun changement — vérifie le serveur)" : ` (+${money(delta)})`)
+          );
         } else {
           showToast("Transaction enregistree.");
         }
@@ -1152,30 +1162,50 @@ async function updateDrawInfo(event) {
   });
 }
 
-async function updateDrawResult(event) {
-  event.preventDefault();
+function parseMoneyInput(value) {
+  const raw = String(value ?? "").trim().replace(/\s/g, "").replace(",", ".");
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+}
 
-  return withButtonBusy(event.submitter || els.drawResultForm.querySelector("button[type='submit']"), "Sauvegarde...", async () => {
-    const amount = Number(els.resultAmountInput.value || 0);
+async function submitDrawResult({ replacePrevious, button }) {
+  const previousWins = Number(state?.groupWins || 0);
+  const amount = parseMoneyInput(els.resultAmountInput.value);
+  if (!Number.isFinite(amount) || amount < 0) {
+    showToast("Montant invalide.");
+    return;
+  }
+  if (amount === 0 && !replacePrevious) {
+    showToast("Entre un montant plus grand que 0$ pour ajouter un gain.");
+    return;
+  }
+
+  return withButtonBusy(button, replacePrevious ? "Correction..." : "Ajout...", async () => {
     state = await api("/api/admin/draw-result", {
       method: "POST",
       body: JSON.stringify({
         date: els.resultDateInput.value || null,
         amount,
-        bonusEntries: Number(els.resultBonusInput.value || 0),
+        bonusEntries: Number(els.resultBonusInput.value || 0) || 0,
         note: els.resultNoteInput.value.trim(),
-        adminPin: getAdminPin()
+        adminPin: getAdminPin(),
+        replacePrevious: !!replacePrevious
       }),
       timeoutMs: 45000
     });
     render();
+    const newWins = Number(state.groupWins || 0);
+    const delta = newWins - previousWins;
     if (amount > 0) {
       showToast(
-        `Résultat ${money(amount)} enregistré → nos gains: ${money(state.groupWins)}. ` +
-          `Prochain paiement: ${state.nextDraw?.coveredByGains ? "couvert" : money(state.nextDraw?.missingAmount) + " manquant"}.`
+        `${replacePrevious ? "Résultat corrigé" : "Gain ajouté"}: ${money(amount)}. ` +
+          `Nos gains: ${money(previousWins)} → ${money(newWins)}` +
+          (delta === 0 ? " (aucun changement net)" : ` (${delta > 0 ? "+" : ""}${money(delta)})`) +
+          `. Prochain: ${state.nextDraw?.coveredByGains ? "couvert" : money(state.nextDraw?.missingAmount) + " manquant"}.`,
+        7000
       );
     } else {
-      showToast("Résultat mis à jour (aucun gain monétaire).");
+      showToast(`Résultat corrigé. Nos gains: ${money(newWins)}.`);
     }
   }).catch((error) => {
     if (String(error.message).includes("PIN")) {
@@ -1183,6 +1213,18 @@ async function updateDrawResult(event) {
     }
     showToast(error.message, 6000);
   });
+}
+
+async function updateDrawResult(event) {
+  event.preventDefault();
+  const button = event.submitter || els.drawResultForm?.querySelector("button[type='submit']");
+  // Bouton principal = TOUJOURS ajouter (s'additionne dans nos gains)
+  return submitDrawResult({ replacePrevious: false, button });
+}
+
+async function replaceDrawResult() {
+  const button = document.querySelector("#replaceResultGain");
+  return submitDrawResult({ replacePrevious: true, button });
 }
 
 async function uploadResultPhotos(event) {
@@ -1414,6 +1456,7 @@ function setToday() {
 on(els.form, "submit", addTransaction);
 on(els.drawInfoForm, "submit", updateDrawInfo);
 on(els.drawResultForm, "submit", updateDrawResult);
+on(document.querySelector("#replaceResultGain"), "click", replaceDrawResult);
 on(els.resultPhotoForm, "submit", uploadResultPhotos);
 on(els.ticketPhotoForm, "submit", uploadTicketPhotos);
 on(els.participantForm, "submit", addParticipant);
