@@ -1,10 +1,9 @@
-const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
+﻿const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
 const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v3`;
 const REFRESH_INTERVAL_MS = 30000;
-const API_TIMEOUT_MS = 20000;
-let loadFailureCount = 0;
+const API_TIMEOUT_MS = 15000;
 const RENDER_API_ORIGIN = "https://groupe-loto-max-pascal-cezinc.onrender.com";
 const LOCAL_HOSTS = new Set(["", "localhost", "127.0.0.1"]);
 const host = window.location.hostname.toLowerCase();
@@ -151,12 +150,6 @@ let combinedTotalLoading = false;
 let combinedTotalError = "";
 let ticketPhotosHydrated = false;
 let resultPhotosHydrated = false;
-let ticketPhotosLoading = false;
-let resultPhotosLoading = false;
-let ticketPhotosError = "";
-let resultPhotosError = "";
-let ticketPhotosPromise = null;
-let resultPhotosPromise = null;
 
 function readCachedState() {
   try {
@@ -273,6 +266,25 @@ function previousScheduledDrawIso(referenceIso, drawDays) {
 function lastResultDefaultDateIso() {
   const nextPublicDraw = state?.prizeInfo?.drawDate || previousDayIso(state?.nextDraw?.date);
   return previousScheduledDrawIso(nextPublicDraw, [2, 5]);
+}
+
+/** Date du formulaire "résultat" : récente si mise à jour aujourd'hui, sinon dernier tirage passé. */
+function resultFormDefaultDateIso() {
+  const result = state?.lastDrawResult;
+  if (result?.updatedAt && result?.date) {
+    const updated = new Date(result.updatedAt);
+    if (!Number.isNaN(updated.getTime())) {
+      const now = new Date();
+      const sameDay =
+        updated.getFullYear() === now.getFullYear() &&
+        updated.getMonth() === now.getMonth() &&
+        updated.getDate() === now.getDate();
+      if (sameDay) {
+        return String(result.date).slice(0, 10);
+      }
+    }
+  }
+  return lastResultDefaultDateIso();
 }
 
 function resultDateForDisplay(result, prizeDrawDate) {
@@ -550,7 +562,6 @@ async function loadState({ silent = false } = {}) {
 
     const previous = state;
     state = await api("/api/state", { timeoutMs: 60000 });
-    loadFailureCount = 0;
     // Keep already-hydrated photo bytes when /state returns metadata only.
     if (previous?.ticketPhotos?.some((p) => p.imageDataUrl) && state.ticketPhotos) {
       const map = new Map(previous.ticketPhotos.map((p) => [p.id, p.imageDataUrl]));
@@ -564,8 +575,8 @@ async function loadState({ silent = false } = {}) {
         p.imageDataUrl ? p : { ...p, imageDataUrl: map.get(p.id) || "" }
       ));
     }
-    ticketPhotosHydrated = photosHaveBytes(state.ticketPhotos);
-    resultPhotosHydrated = photosHaveBytes(state.resultPhotos);
+    ticketPhotosHydrated = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
+    resultPhotosHydrated = (state.resultPhotos || []).some((p) => p.imageDataUrl);
     if (!selectedId || !(state.participants || []).some((participant) => participant.id === selectedId)) {
       selectedId = state.participants?.at(-1)?.id || state.participants?.[0]?.id;
     }
@@ -579,39 +590,17 @@ async function loadState({ silent = false } = {}) {
     if (adminUnlocked) {
       refreshCombinedAdminTotal();
     }
-    if (!silent) {
-      hideStartupLoading();
-      prefetchPhotosInBackground();
-    }
+    if (!silent) hideStartupLoading();
   } catch (error) {
     if (!silent) {
       if (state) {
         showToast(`Mise a jour en cours: ${error.message}`, 4000);
         hideStartupLoading();
-            } else {
-        loadFailureCount += 1;
-        if (loadFailureCount >= 4) {
-          const cached = readCachedState();
-          if (cached?.participants?.length) {
-            try {
-              state = cached;
-              render();
-              showToast("Mode cache — serveur lent. Rafraichis plus tard.", 5000);
-            } catch {
-              /* ignore */
-            }
-          } else {
-            showToast(`Serveur indisponible: ${error.message}. Reessaie dans 1 min.`, 8000);
-            setText(els.lastUpdated, "Hors ligne — reessaie plus tard.");
-          }
-          hideStartupLoading();
-          loadFailureCount = 0;
-        } else {
-          showToast(`Impossible de charger les donnees: ${error.message}`, 4000);
-          setStartupProgress(`Connexion… essai ${loadFailureCount}/4`, 88);
-          window.clearTimeout(startupRetryTimer);
-          startupRetryTimer = window.setTimeout(() => loadState(), 2500);
-        }
+      } else {
+        showToast(`Impossible de charger les donnees: ${error.message}`, 6000);
+        setStartupProgress("Connexion en cours. Nouvel essai dans 2 secondes…", 88);
+        window.clearTimeout(startupRetryTimer);
+        startupRetryTimer = window.setTimeout(() => loadState(), 2000);
       }
     }
   } finally {
@@ -619,146 +608,30 @@ async function loadState({ silent = false } = {}) {
   }
 }
 
-function photoHasBytes(photo) {
-  return typeof photo?.imageDataUrl === "string" && photo.imageDataUrl.startsWith("data:image");
-}
-
-function photosHaveBytes(photos) {
-  return (photos || []).some(photoHasBytes);
-}
-
-function photosNeedBytes(photos) {
-  const list = photos || [];
-  if (!list.length) return false;
-  return list.some((p) => !photoHasBytes(p));
-}
-
-async function apiWithRetry(path, { timeoutMs = 90000, attempts = 4 } = {}) {
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      return await api(path, { timeoutMs });
-    } catch (error) {
-      lastError = error;
-      if (attempt < attempts) {
-        // Backoff: ~0.8s, 2.4s, 4.8s — helps with Render free-tier blips.
-        await wait(800 * attempt * attempt);
-      }
-    }
-  }
-  throw lastError || new Error("Echec reseau.");
-}
-
-/**
- * Load ticket photo bytes (lazy). Safe to call repeatedly:
- * - re-renders if already in memory (fixes "Chargement…" stuck on reopen)
- * - retries on network failure
- * - de-dupes concurrent calls
- */
-async function ensureTicketPhotos({ force = false } = {}) {
-  if (!state) return false;
-
-  if (!force && ticketPhotosHydrated && photosHaveBytes(state.ticketPhotos)) {
-    ticketPhotosError = "";
-    renderTickets();
-    return true;
-  }
-
-  // Metadata says empty — nothing to fetch.
-  if (!force && !(state.ticketPhotos || []).length && ticketPhotosHydrated) {
-    renderTickets();
-    return true;
-  }
-
-  if (ticketPhotosPromise) return ticketPhotosPromise;
-
-  ticketPhotosLoading = true;
-  ticketPhotosError = "";
-  renderTickets();
-
-  ticketPhotosPromise = (async () => {
-    try {
-      const data = await apiWithRetry("/api/ticket-photos", { timeoutMs: 90000, attempts: 4 });
-      const photos = data?.photos ?? data ?? [];
-      state.ticketPhotos = Array.isArray(photos) ? photos : [];
-      ticketPhotosHydrated = true;
-      ticketPhotosError = "";
-      renderTickets();
-      return true;
-    } catch (error) {
-      ticketPhotosHydrated = false;
-      ticketPhotosError = error?.message || "Erreur de chargement";
-      renderTickets();
-      showToast(`Photos des billets: ${ticketPhotosError}`, 5000);
-      return false;
-    } finally {
-      ticketPhotosLoading = false;
-      ticketPhotosPromise = null;
-    }
-  })();
-
-  return ticketPhotosPromise;
-}
-
-async function ensureResultPhotos({ force = false } = {}) {
-  if (!state) return false;
-
-  if (!force && resultPhotosHydrated && photosHaveBytes(state.resultPhotos)) {
-    resultPhotosError = "";
-    renderResultPhotos();
-    return true;
-  }
-
-  if (!force && !(state.resultPhotos || []).length && resultPhotosHydrated) {
-    renderResultPhotos();
-    return true;
-  }
-
-  if (resultPhotosPromise) return resultPhotosPromise;
-
-  resultPhotosLoading = true;
-  resultPhotosError = "";
-  renderResultPhotos();
-
-  resultPhotosPromise = (async () => {
-    try {
-      const data = await apiWithRetry("/api/result-photos", { timeoutMs: 90000, attempts: 4 });
-      const photos = data?.photos ?? data ?? [];
-      state.resultPhotos = Array.isArray(photos) ? photos : [];
-      resultPhotosHydrated = true;
-      resultPhotosError = "";
-      renderResultPhotos();
-      return true;
-    } catch (error) {
-      resultPhotosHydrated = false;
-      resultPhotosError = error?.message || "Erreur de chargement";
-      renderResultPhotos();
-      showToast(`Photos de resultat: ${resultPhotosError}`, 5000);
-      return false;
-    } finally {
-      resultPhotosLoading = false;
-      resultPhotosPromise = null;
-    }
-  })();
-
-  return resultPhotosPromise;
-}
-
-/** Warm photo endpoints after first paint so opening the modal is instant. */
-function prefetchPhotosInBackground() {
+async function ensureTicketPhotos() {
   if (!state) return;
-  window.setTimeout(() => {
-    try {
-      if ((state.ticketPhotos || []).length && !photosHaveBytes(state.ticketPhotos) && !ticketPhotosLoading) {
-        ensureTicketPhotos().catch(() => {});
-      }
-      if ((state.resultPhotos || []).length && !photosHaveBytes(state.resultPhotos) && !resultPhotosLoading) {
-        ensureResultPhotos().catch(() => {});
-      }
-    } catch {
-      /* ignore */
-    }
-  }, 1200);
+  if (ticketPhotosHydrated && (state.ticketPhotos || []).some((p) => p.imageDataUrl)) return;
+  try {
+    const data = await api("/api/ticket-photos", { timeoutMs: 60000 });
+    state.ticketPhotos = data.photos || data || [];
+    ticketPhotosHydrated = true;
+    renderTickets();
+  } catch (error) {
+    showToast(`Photos des billets: ${error.message}`, 5000);
+  }
+}
+
+async function ensureResultPhotos() {
+  if (!state) return;
+  if (resultPhotosHydrated && (state.resultPhotos || []).some((p) => p.imageDataUrl)) return;
+  try {
+    const data = await api("/api/result-photos", { timeoutMs: 60000 });
+    state.resultPhotos = data.photos || data || [];
+    resultPhotosHydrated = true;
+    renderResultPhotos();
+  } catch (error) {
+    showToast(`Photos de resultat: ${error.message}`, 5000);
+  }
 }
 
 function getAdminPin() {
@@ -925,7 +798,8 @@ function renderMetrics() {
   setInputValueUnlessFocused(els.jackpotInput, prizeInfo.jackpotAmount || "");
   setInputValueUnlessFocused(els.secondaryPrizesInput, prizeInfo.secondaryPrizes || "");
   const result = state.lastDrawResult || {};
-  setInputValueUnlessFocused(els.resultDateInput, dateInputValue(result.date || lastResultDefaultDateIso()));
+  // Ne pas figer une vieille date de résultat (ex: juin) : le gain disparaissait de l'historique.
+  setInputValueUnlessFocused(els.resultDateInput, dateInputValue(resultFormDefaultDateIso()));
   setInputValueUnlessFocused(els.resultAmountInput, String(result.amount || 0));
   setInputValueUnlessFocused(els.resultBonusInput, String(result.bonusEntries || 0));
   setInputValueUnlessFocused(els.resultNoteInput, result.note || "");
@@ -954,13 +828,13 @@ function renderMetrics() {
     setText(els.nextDrawStatus, "Payé par nos gains");
     setText(
       els.drawMeterText,
-      `Le prochain paiement automatique est couvert par nos gains. Le retrait passera le ${nextPaymentDateLabel()}; il restera ${money(nextDraw.remainderAfterPayment)} dans nos gains.`
+      `Nos gains: ${money(groupWins)} (tirage ${money(drawTotal)}). Couvert par les gains. Retrait auto le ${nextPaymentDateLabel()}; il restera ${money(nextDraw.remainderAfterPayment)}.`
     );
   } else {
     setText(els.nextDrawStatus, `${money(nextDraw.missingAmount)} manquant`);
     setText(
       els.drawMeterText,
-      `Il manque ${money(nextDraw.missingAmount)} dans nos gains pour couvrir le prochain paiement automatique. Si nos gains ne suffisent pas, un retrait de ${money(state.drawCostPerParticipant)} par participant sera appliqué le ${nextPaymentDateLabel()}.`
+      `Nos gains: ${money(groupWins)} sur ${money(drawTotal)} pour le prochain paiement. Il manque ${money(nextDraw.missingAmount)}. Sans gains suffisants, retrait de ${money(state.drawCostPerParticipant)} / participant le ${nextPaymentDateLabel()}.`
     );
   }
 }
@@ -1052,34 +926,9 @@ function renderResultPhotos() {
     : latestDate
       ? `Aucune photo du résultat du ${dateLabel(latestDate)}${adminUnlocked && oldPhotoCount > 0 ? ` (${oldPhotoCount} ancienne${oldPhotoCount > 1 ? "s" : ""})` : ""}.`
       : "Aucune photo de résultat ajoutée pour le moment.";
-  // Keep button enabled when metadata exists (bytes load on open).
   els.openResultPhotos.disabled = visiblePhotos.length === 0;
-
-  if (!els.resultPhotoGallery) return;
-
-  // Don't wipe a successful gallery during silent refresh if we already have bytes.
-  const readyPhotos = visiblePhotos.filter(photoHasBytes);
-  if (resultPhotosLoading && !readyPhotos.length) {
-    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…<br><small>Gros fichiers, ça peut prendre quelques secondes.</small></p>`;
-    return;
-  }
-  if (resultPhotosError && !readyPhotos.length && visiblePhotos.length) {
-    els.resultPhotoGallery.innerHTML = `
-      <p class="empty-state">Impossible de charger les photos.<br><small>${escapeHtml(resultPhotosError)}</small></p>
-      <button class="accent-button compact-button" type="button" id="retryResultPhotos">Réessayer</button>`;
-    els.resultPhotoGallery.querySelector("#retryResultPhotos")?.addEventListener("click", () => {
-      ensureResultPhotos({ force: true });
-    });
-    return;
-  }
-  if (visiblePhotos.length && !readyPhotos.length && photosNeedBytes(visiblePhotos)) {
-    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
-    return;
-  }
-
-  const toShow = readyPhotos.length ? readyPhotos : visiblePhotos;
-  els.resultPhotoGallery.innerHTML = toShow.length
-    ? toShow.map(renderResultPhoto).join("")
+  els.resultPhotoGallery.innerHTML = visiblePhotos.length
+    ? visiblePhotos.map(renderResultPhoto).join("")
     : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
 
   els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
@@ -1088,14 +937,11 @@ function renderResultPhotos() {
 }
 
 function renderResultPhoto(photo) {
-  const src = photoHasBytes(photo) ? photo.imageDataUrl : "";
   return `
     <article class="ticket-card">
-      ${src
-        ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(src)}" alt="Résultat du ${dateLabel(photo.date)}" loading="eager" decoding="async" />
-      </a>`
-        : `<div class="empty-state">Image non chargée</div>`}
+      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Résultat du dernier tirage")}</small>
@@ -1113,31 +959,8 @@ function renderTickets() {
     ? `${photos.length} photo${photos.length > 1 ? "s" : ""} ajoutée${photos.length > 1 ? "s" : ""}${latestDate ? ` pour le tirage du ${dateLabel(latestDate)}` : ""}.`
     : "Aucune photo ajoutée pour le moment.";
   els.openTickets.disabled = photos.length === 0;
-
-  if (!els.ticketGallery) return;
-
-  const readyPhotos = photos.filter(photoHasBytes);
-  if (ticketPhotosLoading && !readyPhotos.length) {
-    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…<br><small>Gros fichiers, ça peut prendre quelques secondes.</small></p>`;
-    return;
-  }
-  if (ticketPhotosError && !readyPhotos.length && photos.length) {
-    els.ticketGallery.innerHTML = `
-      <p class="empty-state">Impossible de charger les photos.<br><small>${escapeHtml(ticketPhotosError)}</small></p>
-      <button class="accent-button compact-button" type="button" id="retryTicketPhotos">Réessayer</button>`;
-    els.ticketGallery.querySelector("#retryTicketPhotos")?.addEventListener("click", () => {
-      ensureTicketPhotos({ force: true });
-    });
-    return;
-  }
-  if (photos.length && !readyPhotos.length && photosNeedBytes(photos)) {
-    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
-    return;
-  }
-
-  const toShow = readyPhotos.length ? readyPhotos : photos;
-  els.ticketGallery.innerHTML = toShow.length
-    ? toShow.map(renderTicketPhoto).join("")
+  els.ticketGallery.innerHTML = photos.length
+    ? photos.map(renderTicketPhoto).join("")
     : `<p class="empty-state">Aucune photo de billet pour le moment.</p>`;
 
   els.ticketGallery.querySelectorAll("[data-delete-ticket]").forEach((button) => {
@@ -1146,14 +969,11 @@ function renderTickets() {
 }
 
 function renderTicketPhoto(photo) {
-  const src = photoHasBytes(photo) ? photo.imageDataUrl : "";
   return `
     <article class="ticket-card">
-      ${src
-        ? `<a href="${escapeHtml(src)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(src)}" alt="Billet du ${dateLabel(photo.date)}" loading="eager" decoding="async" />
-      </a>`
-        : `<div class="empty-state">Image non chargée</div>`}
+      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
+        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
+      </a>
       <div>
         <strong>${dateLabel(photo.date)}</strong>
         <small>${escapeHtml(photo.note || "Photo de billet")}</small>
@@ -1206,7 +1026,11 @@ async function addTransaction(event) {
 
         els.noteInput.value = "";
         render();
-        showToast("Transaction enregistree.");
+        if (body.type === "gain") {
+          showToast(`Gain de ${money(body.amount)} enregistré. Nos gains: ${money(state.groupWins)}.`);
+        } else {
+          showToast("Transaction enregistree.");
+        }
       } catch (error) {
         if (String(error.message).includes("PIN")) {
           sessionStorage.removeItem(ADMIN_PIN_KEY);
@@ -1332,11 +1156,12 @@ async function updateDrawResult(event) {
   event.preventDefault();
 
   return withButtonBusy(event.submitter || els.drawResultForm.querySelector("button[type='submit']"), "Sauvegarde...", async () => {
+    const amount = Number(els.resultAmountInput.value || 0);
     state = await api("/api/admin/draw-result", {
       method: "POST",
       body: JSON.stringify({
         date: els.resultDateInput.value || null,
-        amount: Number(els.resultAmountInput.value || 0),
+        amount,
         bonusEntries: Number(els.resultBonusInput.value || 0),
         note: els.resultNoteInput.value.trim(),
         adminPin: getAdminPin()
@@ -1344,7 +1169,14 @@ async function updateDrawResult(event) {
       timeoutMs: 45000
     });
     render();
-    showToast("Resultat du dernier tirage mis a jour.");
+    if (amount > 0) {
+      showToast(
+        `Résultat ${money(amount)} enregistré → nos gains: ${money(state.groupWins)}. ` +
+          `Prochain paiement: ${state.nextDraw?.coveredByGains ? "couvert" : money(state.nextDraw?.missingAmount) + " manquant"}.`
+      );
+    } else {
+      showToast("Résultat mis à jour (aucun gain monétaire).");
+    }
   }).catch((error) => {
     if (String(error.message).includes("PIN")) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
@@ -1596,7 +1428,9 @@ on(els.transactionType, "change", renderSelectors);
 on(els.resetDemo, "click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
 on(els.openResultPhotos, "click", async () => {
   els.resultPhotosModal?.classList.remove("hidden");
-  // ensureResultPhotos always re-renders (even when bytes are already in memory).
+  if (els.resultPhotoGallery) {
+    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+  }
   await ensureResultPhotos();
 });
 on(els.closeResultPhotos, "click", () => els.resultPhotosModal?.classList.add("hidden"));
@@ -1607,6 +1441,9 @@ on(els.resultPhotosModal, "click", (event) => {
 });
 on(els.openTickets, "click", async () => {
   els.ticketsModal?.classList.remove("hidden");
+  if (els.ticketGallery) {
+    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
+  }
   await ensureTicketPhotos();
 });
 on(els.closeTickets, "click", () => els.ticketsModal?.classList.add("hidden"));

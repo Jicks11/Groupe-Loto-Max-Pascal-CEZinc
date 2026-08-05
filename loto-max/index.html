@@ -38,8 +38,8 @@
     <link rel="preconnect" href="https://groupe-loto-max-pascal-cezinc.onrender.com" crossorigin />
     <link rel="dns-prefetch" href="https://groupe-loto-max-pascal-cezinc.onrender.com" />
     <!-- Relative + absolute: works at /loto-max/ and on root / -->
-    <link rel="stylesheet" href="styles.css?v=20260722-pwa" />
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260722-pwa" />
+    <link rel="stylesheet" href="styles.css?v=20260805-gain-fix" />
+    <link rel="stylesheet" href="/loto-max/styles.css?v=20260805-gain-fix" />
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -267,6 +267,11 @@
 
               <form class="admin-form participant-admin-form" id="drawResultForm">
                 <h3>R&eacute;sultat du dernier tirage</h3>
+                <p class="admin-hint">
+                  Remplace le r&eacute;sultat pr&eacute;c&eacute;dent (ne s&rsquo;additionne pas si tu r&eacute;-enregistres le m&ecirc;me).
+                  Pour un gain en plus, utilise Action → <strong>Gain du groupe</strong>.
+                  V&eacute;rifie la <strong>date du tirage</strong> (pas une vieille date).
+                </p>
 
                 <div class="form-row">
                   <label>
@@ -438,8 +443,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="app.js?v=20260722-pwa" defer></script>
-    <script src="/loto-max/app.js?v=20260722-pwa" defer></script>
+    <script src="app.js?v=20260805-gain-fix" defer></script>
+    <script src="/loto-max/app.js?v=20260805-gain-fix" defer></script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", function () {

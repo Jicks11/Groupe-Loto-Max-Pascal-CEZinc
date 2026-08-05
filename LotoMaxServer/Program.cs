@@ -872,7 +872,8 @@ public sealed class LotoStore
             var amount = Math.Max(0, request.Amount ?? 0);
             var bonusEntries = Math.Max(0, request.BonusEntries ?? 0);
             var note = CleanDrawInfoText(request.Note, 140);
-            var drawDate = request.Date ?? state.LastDrawResult.Date ?? LotoClock.Today;
+            // Si aucune date n'est fournie, utiliser le dernier tirage public passé (pas une vieille date figée).
+            var drawDate = request.Date ?? LastCompletedPublicDrawDate(state, LotoClock.Now);
             var now = LotoClock.Now;
 
             if (!string.IsNullOrWhiteSpace(state.LastDrawResult.TransactionId))
@@ -883,9 +884,8 @@ public sealed class LotoStore
             string? transactionId = null;
             if (amount > 0)
             {
-                transactionId = string.IsNullOrWhiteSpace(state.LastDrawResult.TransactionId)
-                    ? $"result-{drawDate:yyyyMMdd}-{Guid.NewGuid():N}"
-                    : state.LastDrawResult.TransactionId;
+                // Nouvel id à chaque mise à jour pour éviter les collisions et marquer le mouvement comme récent.
+                transactionId = $"result-{drawDate:yyyyMMdd}-{Guid.NewGuid():N}";
 
                 state.Transactions.Insert(0, new LotoTransaction(
                     transactionId,
@@ -1665,12 +1665,40 @@ public sealed class LotoStore
             .Select(ToHistoryEntry)
             .ToList();
 
-    private List<HistoryEntryView> GroupHistory(LotoState state) =>
-        state.Transactions
-            .Where(transaction => transaction.Type != "opening")
-            .OrderByDescending(transaction => transaction.Date)
-            .ThenByDescending(transaction => transaction.CreatedAt)
-            .Take(50)
+    private List<HistoryEntryView> GroupHistory(LotoState state)
+    {
+        // Les retraits de tirage (1 ligne x N participants) noyaient les gains dans le top 50
+        // trié par date de tirage. On force la présence des mouvements de groupe (gains, etc.)
+        // et on trie d'abord par date de création pour qu'un gain venant d'être saisi apparaisse.
+        var nonOpening = state.Transactions
+            .Where(transaction => !string.Equals(transaction.Type, "opening", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var groupLevel = nonOpening
+            .Where(transaction =>
+                transaction.ParticipantId is null ||
+                string.Equals(transaction.Type, "gain", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(transaction.Type, "group_draw_payment", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .ThenByDescending(transaction => transaction.Date)
+            .Take(40);
+
+        var participantLevel = nonOpening
+            .Where(transaction => transaction.ParticipantId is not null)
+            .Where(transaction =>
+                !string.Equals(transaction.Type, "gain", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(transaction.Type, "group_draw_payment", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .ThenByDescending(transaction => transaction.Date)
+            .Take(50);
+
+        return groupLevel
+            .Concat(participantLevel)
+            .GroupBy(transaction => transaction.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderByDescending(transaction => transaction.CreatedAt)
+            .ThenByDescending(transaction => transaction.Date)
+            .Take(80)
             .Select(transaction =>
             {
                 var participant = transaction.ParticipantId is null
@@ -1680,6 +1708,7 @@ public sealed class LotoStore
                 return ToHistoryEntry(transaction) with { Title = title };
             })
             .ToList();
+    }
 
     private static HistoryEntryView ToHistoryEntry(LotoTransaction transaction) =>
         new(transaction.Date, transaction.Amount, transaction.Title, string.IsNullOrWhiteSpace(transaction.Note)
