@@ -12,9 +12,7 @@
     <meta name="description" content="Équipe B Moulage — Loto-Max CEZinc" />
     <title>Équipe B Moulage — Loto-Max CEZinc</title>
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="manifest" href="/loto-max/manifest.webmanifest" />
     <link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32" />
-    <link rel="icon" href="/loto-max/assets/favicon-32.png" type="image/png" sizes="32x32" />
     <link rel="icon" href="assets/favicon-16.png" type="image/png" sizes="16x16" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" sizes="180x180" />
     <link rel="apple-touch-icon" href="/loto-max/assets/apple-touch-icon.png" sizes="180x180" />
@@ -35,11 +33,10 @@
           linear-gradient(180deg, #061226 0%, #081d37 55%, #04101f 100%) !important;
       }
     </style>
-    <link rel="preconnect" href="https://groupe-loto-max-pascal-cezinc.onrender.com" crossorigin />
-    <link rel="dns-prefetch" href="https://groupe-loto-max-pascal-cezinc.onrender.com" />
-    <!-- Relative + absolute: works at /loto-max/ and on root / -->
-    <link rel="stylesheet" href="styles.css?v=20260805-gain-add" />
-    <link rel="stylesheet" href="/loto-max/styles.css?v=20260805-gain-add" />
+    <link rel="stylesheet" href="styles.css?v=20260825-supabase" />
+    <script>
+      window.LOTO_SUPABASE_ANON_KEY = "sb_publishable_bVxnr-7GaSLPLWuGDrlnPQ_X7jQ8F_M";
+    </script>
   </head>
   <body>
     <div class="startup-overlay" id="startupOverlay" role="status" aria-live="polite">
@@ -445,13 +442,12 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="app.js?v=20260805-gain-add" defer></script>
-    <script src="/loto-max/app.js?v=20260805-gain-add" defer></script>
+    <script src="loto-engine.js?v=20260825-supabase"></script>
+    <script src="app.js?v=20260825-supabase" defer></script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", function () {
-          var sw = location.pathname.indexOf("/loto-max") === 0 ? "/loto-max/sw.js" : "./sw.js";
-          navigator.serviceWorker.register(sw).catch(function () {});
+          navigator.serviceWorker.register("./sw.js").catch(function () {});
         });
       }
     </script>

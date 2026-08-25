@@ -1,33 +1,15 @@
-﻿const APP_SCOPE = window.location.pathname.startsWith("/loto-649") ? "loto-649" : "loto-max";
+﻿const APP_SCOPE = window.location.pathname.includes("loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
-const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v3`;
+const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v4`;
 const REFRESH_INTERVAL_MS = 30000;
 const API_TIMEOUT_MS = 15000;
-const RENDER_API_ORIGIN = "https://groupe-loto-max-pascal-cezinc.onrender.com";
-const LOCAL_HOSTS = new Set(["", "localhost", "127.0.0.1"]);
-const host = window.location.hostname.toLowerCase();
-const sameOriginApi = LOCAL_HOSTS.has(host) || host.endsWith(".onrender.com");
-const API_ORIGIN = (window.LOTO_API_ORIGIN || (sameOriginApi ? "" : RENDER_API_ORIGIN)).replace(/\/$/, "");
-const API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api/loto-649" : "/api";
-const API_BASE = `${API_ORIGIN}${API_BASE_PATH}`;
-
-/** Kick Render free-tier awake ASAP (before the rest of the UI binds). */
-function wakeServerEarly() {
-  try {
-    const url = `${API_BASE}/ping`;
-    fetch(url, { method: "GET", cache: "no-store", mode: "cors" }).catch(() => {});
-    // Second call: real state path (warms DB + cache).
-    fetch(`${API_BASE}/state`, { method: "GET", cache: "no-store", mode: "cors" }).catch(() => {});
-  } catch {
-    // ignore
-  }
-}
-wakeServerEarly();
+const LOTO_GROUP_ID = APP_SCOPE === "loto-649" ? "loto-649" : "loto-max";
+const OTHER_GROUP_ID = APP_SCOPE === "loto-649" ? "loto-max" : "loto-649";
 const ADMIN_BUTTON_LABEL = "Mode Admin r\u00e9serv\u00e9 \u00e0 Pascal";
 const CURRENT_GROUP_LABEL = APP_SCOPE === "loto-649" ? "6/49" : "Loto Max";
 const OTHER_GROUP_LABEL = APP_SCOPE === "loto-649" ? "Loto Max" : "6/49";
-const OTHER_API_BASE_PATH = APP_SCOPE === "loto-649" ? "/api" : "/api/loto-649";
+const OTHER_API_BASE_PATH = APP_SCOPE === "loto-649" ? "/loto-max/" : "./loto-649/";
 const JACKPOT_TONE_CLASSES = [
   "jackpot-tone-white",
   "jackpot-tone-green",
@@ -460,68 +442,23 @@ function escapeHtml(value) {
 }
 
 async function api(path, options = {}) {
-  const { timeoutMs = API_TIMEOUT_MS, ...fetchOptions } = options;
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  if (!window.LotoEngine) {
+    throw new Error("Moteur Loto introuvable.");
+  }
   const endpoint = path.startsWith("/api/") ? path.slice(4) : path;
-  const url = `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
-
-  let response;
+  const route = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
   try {
-    response = await fetch(url, {
-      ...fetchOptions,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(fetchOptions.headers || {})
-      }
-    });
+    return await window.LotoEngine.handle(LOTO_GROUP_ID, route, options);
   } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("Le serveur prend trop de temps a repondre. Attends quelques minutes et reessaie.");
-    }
-
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
+    throw new Error(error.message || "Erreur serveur.");
   }
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || "Erreur serveur.");
-  }
-  return payload;
 }
 
-async function fetchGroupState(basePath, options = {}) {
-  const { timeoutMs = API_TIMEOUT_MS } = options;
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  const url = `${API_ORIGIN}${basePath}/state`;
-
-  let response;
-  try {
-    response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json"
-      }
-    });
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("Le serveur prend trop de temps a repondre.");
-    }
-
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
+async function fetchGroupState(_basePath, _options = {}) {
+  if (!window.LotoEngine) {
+    throw new Error("Moteur Loto introuvable.");
   }
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || "Erreur serveur.");
-  }
-  return payload;
+  return window.LotoEngine.view(OTHER_GROUP_ID, false);
 }
 
 async function withButtonBusy(button, label, action) {
