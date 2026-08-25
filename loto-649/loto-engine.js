@@ -88,7 +88,7 @@
   }
 
   function pinOf(state) {
-    return String(state?.settings?.adminPin || "2468");
+    return String(state?.settings?.adminPin || "2020");
   }
 
   function requireAdmin(state, pin) {
