@@ -70,8 +70,18 @@
 
         <div class="status-strip" aria-label="Derniere mise a jour du groupe">
           <span id="lastUpdated">Derniere mise a jour: chargement...</span>
+          <a class="group-switch" id="otherGroupLink" href="../loto-max/">← Ouvrir Loto Max</a>
         </div>
       </header>
+      <script>
+        (function () {
+          var a = document.getElementById("otherGroupLink");
+          if (!a) return;
+          var p = location.pathname || "";
+          if (p.indexOf("/loto-649") !== -1) a.href = "../loto-max/";
+          else a.href = "../";
+        })();
+      </script>
 
       <main class="dashboard">
         <section class="hero-panel" aria-labelledby="groupTitle">

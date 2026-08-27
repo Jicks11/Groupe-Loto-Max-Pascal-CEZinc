@@ -216,6 +216,23 @@ small {
   margin-bottom: 0;
 }
 
+.group-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(200, 16, 46, 0.28);
+  color: #ffe9ee !important;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.group-switch:active {
+  filter: brightness(1.1);
+}
+
 .status-strip {
   display: flex;
   flex-wrap: wrap;
