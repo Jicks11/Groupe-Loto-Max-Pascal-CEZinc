@@ -1,8 +1,8 @@
-﻿const APP_SCOPE = window.location.pathname.includes("loto-649") ? "loto-649" : "loto-max";
+const APP_SCOPE = window.location.pathname.includes("loto-649") ? "loto-649" : "loto-max";
 const SELECTED_MEMBER_KEY = `${APP_SCOPE}-selected-member`;
 const ADMIN_PIN_KEY = `${APP_SCOPE}-admin-pin`;
-const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v4`;
-const REFRESH_INTERVAL_MS = 30000;
+const STATE_CACHE_KEY = `${APP_SCOPE}-state-cache-v6`;
+const REFRESH_INTERVAL_MS = 180000;
 const API_TIMEOUT_MS = 15000;
 const LOTO_GROUP_ID = APP_SCOPE === "loto-649" ? "loto-649" : "loto-max";
 const OTHER_GROUP_ID = APP_SCOPE === "loto-649" ? "loto-max" : "loto-649";
@@ -55,28 +55,21 @@ const els = {
   groupTotal: document.querySelector("#groupTotal"),
   drawTotal: document.querySelector("#drawTotal"),
   drawFormula: document.querySelector("#drawFormula"),
-  ticketPhotoCount: document.querySelector("#ticketPhotoCount"),
-  ticketSummary: document.querySelector("#ticketSummary"),
-  openTickets: document.querySelector("#openTickets"),
-  closeTickets: document.querySelector("#closeTickets"),
-  ticketsModal: document.querySelector("#ticketsModal"),
-  ticketGallery: document.querySelector("#ticketGallery"),
-  resultPhotoSummary: document.querySelector("#resultPhotoSummary"),
-  openResultPhotos: document.querySelector("#openResultPhotos"),
-  closeResultPhotos: document.querySelector("#closeResultPhotos"),
-  resultPhotosModal: document.querySelector("#resultPhotosModal"),
-  resultPhotoGallery: document.querySelector("#resultPhotoGallery"),
   activeCount: document.querySelector("#activeCount"),
   participantList: document.querySelector("#participantList"),
   detailTitle: document.querySelector("#detailTitle"),
   detailStatus: document.querySelector("#detailStatus"),
   memberDetail: document.querySelector("#memberDetail"),
   groupHistory: document.querySelector("#groupHistory"),
+  setBalanceForm: document.querySelector("#setBalanceForm"),
+  setBalanceParticipant: document.querySelector("#setBalanceParticipant"),
+  setBalanceCurrent: document.querySelector("#setBalanceCurrent"),
+  setBalanceAmount: document.querySelector("#setBalanceAmount"),
+  setBalanceDate: document.querySelector("#setBalanceDate"),
+  setBalanceNote: document.querySelector("#setBalanceNote"),
   form: document.querySelector("#transactionForm"),
   drawInfoForm: document.querySelector("#drawInfoForm"),
   drawResultForm: document.querySelector("#drawResultForm"),
-  resultPhotoForm: document.querySelector("#resultPhotoForm"),
-  ticketPhotoForm: document.querySelector("#ticketPhotoForm"),
   participantForm: document.querySelector("#participantForm"),
   transactionType: document.querySelector("#transactionType"),
   participantField: document.querySelector("#participantField"),
@@ -97,12 +90,6 @@ const els = {
   resultAmountInput: document.querySelector("#resultAmountInput"),
   resultBonusInput: document.querySelector("#resultBonusInput"),
   resultNoteInput: document.querySelector("#resultNoteInput"),
-  resultPhotoDateInput: document.querySelector("#resultPhotoDateInput"),
-  resultPhotoInput: document.querySelector("#resultPhotoInput"),
-  resultPhotoNoteInput: document.querySelector("#resultPhotoNoteInput"),
-  ticketDateInput: document.querySelector("#ticketDateInput"),
-  ticketPhotoInput: document.querySelector("#ticketPhotoInput"),
-  ticketNoteInput: document.querySelector("#ticketNoteInput"),
   newParticipantName: document.querySelector("#newParticipantName"),
   newParticipantBalance: document.querySelector("#newParticipantBalance"),
   newParticipantPaymentMode: document.querySelector("#newParticipantPaymentMode"),
@@ -130,8 +117,6 @@ let startupRetryTimer = null;
 let otherGroupState = null;
 let combinedTotalLoading = false;
 let combinedTotalError = "";
-let ticketPhotosHydrated = false;
-let resultPhotosHydrated = false;
 
 function readCachedState() {
   try {
@@ -149,11 +134,10 @@ function readCachedState() {
 
 function writeCachedState(nextState) {
   try {
-    // Never persist heavy base64 photos in localStorage.
     const light = {
       ...nextState,
-      ticketPhotos: (nextState.ticketPhotos || []).map((p) => ({ ...p, imageDataUrl: "" })),
-      resultPhotos: (nextState.resultPhotos || []).map((p) => ({ ...p, imageDataUrl: "" }))
+      ticketPhotos: [],
+      resultPhotos: []
     };
     localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), state: light }));
   } catch {
@@ -510,23 +494,9 @@ async function loadState({ silent = false } = {}) {
       setStartupProgress("Mise a jour des soldes...", 70);
     }
 
-    const previous = state;
     state = await api("/api/state", { timeoutMs: 60000 });
-    // Keep already-hydrated photo bytes when /state returns metadata only.
-    if (previous?.ticketPhotos?.some((p) => p.imageDataUrl) && state.ticketPhotos) {
-      const map = new Map(previous.ticketPhotos.map((p) => [p.id, p.imageDataUrl]));
-      state.ticketPhotos = state.ticketPhotos.map((p) => (
-        p.imageDataUrl ? p : { ...p, imageDataUrl: map.get(p.id) || "" }
-      ));
-    }
-    if (previous?.resultPhotos?.some((p) => p.imageDataUrl) && state.resultPhotos) {
-      const map = new Map(previous.resultPhotos.map((p) => [p.id, p.imageDataUrl]));
-      state.resultPhotos = state.resultPhotos.map((p) => (
-        p.imageDataUrl ? p : { ...p, imageDataUrl: map.get(p.id) || "" }
-      ));
-    }
-    ticketPhotosHydrated = (state.ticketPhotos || []).some((p) => p.imageDataUrl);
-    resultPhotosHydrated = (state.resultPhotos || []).some((p) => p.imageDataUrl);
+    state.ticketPhotos = [];
+    state.resultPhotos = [];
     if (!selectedId || !(state.participants || []).some((participant) => participant.id === selectedId)) {
       selectedId = state.participants?.at(-1)?.id || state.participants?.[0]?.id;
     }
@@ -555,32 +525,6 @@ async function loadState({ silent = false } = {}) {
     }
   } finally {
     stateLoading = false;
-  }
-}
-
-async function ensureTicketPhotos() {
-  if (!state) return;
-  if (ticketPhotosHydrated && (state.ticketPhotos || []).some((p) => p.imageDataUrl)) return;
-  try {
-    const data = await api("/api/ticket-photos", { timeoutMs: 60000 });
-    state.ticketPhotos = data.photos || data || [];
-    ticketPhotosHydrated = true;
-    renderTickets();
-  } catch (error) {
-    showToast(`Photos des billets: ${error.message}`, 5000);
-  }
-}
-
-async function ensureResultPhotos() {
-  if (!state) return;
-  if (resultPhotosHydrated && (state.resultPhotos || []).some((p) => p.imageDataUrl)) return;
-  try {
-    const data = await api("/api/result-photos", { timeoutMs: 60000 });
-    state.resultPhotos = data.photos || data || [];
-    resultPhotosHydrated = true;
-    renderResultPhotos();
-  } catch (error) {
-    showToast(`Photos de resultat: ${error.message}`, 5000);
   }
 }
 
@@ -682,8 +626,6 @@ function render() {
     renderParticipants();
     renderMemberDetail();
     renderGroupHistory();
-    renderResultPhotos();
-    renderTickets();
     renderAdminMode();
   } catch (error) {
     console.error("Render error", error);
@@ -702,6 +644,21 @@ function renderSelectors() {
   els.manageParticipantSelect.innerHTML = els.participantSelect.innerHTML;
   els.participantSelect.value = currentValue;
   els.manageParticipantSelect.value = currentManageValue;
+
+  if (els.setBalanceParticipant) {
+    const currentSet = els.setBalanceParticipant.value || selectedId || currentValue;
+    els.setBalanceParticipant.innerHTML = els.participantSelect.innerHTML;
+    els.setBalanceParticipant.value = currentSet;
+    const picked = (state.participants || []).find((p) => p.id === els.setBalanceParticipant.value);
+    if (els.setBalanceCurrent) {
+      els.setBalanceCurrent.textContent = picked ? money(picked.balance) : "—";
+    }
+    if (els.setBalanceAmount && picked && document.activeElement !== els.setBalanceAmount) {
+      if (!els.setBalanceAmount.value) {
+        els.setBalanceAmount.placeholder = String(Number(picked.balance || 0));
+      }
+    }
+  }
 
   const type = els.transactionType?.value || "deposit";
   const isGroupGain = type === "gain";
@@ -753,8 +710,10 @@ function renderMetrics() {
   setInputValueUnlessFocused(els.resultAmountInput, String(result.amount || 0));
   setInputValueUnlessFocused(els.resultBonusInput, String(result.bonusEntries || 0));
   setInputValueUnlessFocused(els.resultNoteInput, result.note || "");
-  setInputValueUnlessFocused(els.resultPhotoDateInput, dateInputValue(lastResultDefaultDateIso() || result.date));
-  setInputValueUnlessFocused(els.ticketDateInput, dateInputValue(prizeInfo.drawDate));
+  const resultDate = result.date ? dateLabel(String(result.date).slice(0, 10)) : "";
+  const resultNote = String(result.note || "").trim();
+  setText(els.lastResultAmount, money(result.amount || 0));
+  setText(els.lastResultMeta, [resultDate, resultNote].filter(Boolean).join(" · ") || "Aucun résultat enregistré");
   setText(els.groupWins, money(groupWins));
   setText(els.winsCoverage, state.paidDraws === 1 ? "1 tirage couvert" : `${state.paidDraws || 0} tirages couverts`);
   setText(els.participantTotal, money(state.participantTotal));
@@ -863,76 +822,6 @@ function renderGroupHistory() {
   els.groupHistory.innerHTML = state.groupHistory.map(renderHistoryRow).join("");
 }
 
-function renderResultPhotos() {
-  const allPhotos = state.resultPhotos || [];
-  const latestDate = lastResultDefaultDateIso() || state.lastDrawResult?.date || allPhotos[0]?.date;
-  const photos = latestDate
-    ? allPhotos.filter((photo) => String(photo.date).slice(0, 10) === latestDate)
-    : allPhotos;
-  const visiblePhotos = photos.length ? photos : (adminUnlocked ? allPhotos : []);
-  const oldPhotoCount = allPhotos.length - photos.length;
-  els.resultPhotoSummary.textContent = photos.length
-    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} du résultat du ${dateLabel(latestDate)}.`
-    : latestDate
-      ? `Aucune photo du résultat du ${dateLabel(latestDate)}${adminUnlocked && oldPhotoCount > 0 ? ` (${oldPhotoCount} ancienne${oldPhotoCount > 1 ? "s" : ""})` : ""}.`
-      : "Aucune photo de résultat ajoutée pour le moment.";
-  els.openResultPhotos.disabled = visiblePhotos.length === 0;
-  els.resultPhotoGallery.innerHTML = visiblePhotos.length
-    ? visiblePhotos.map(renderResultPhoto).join("")
-    : `<p class="empty-state">Aucune photo de résultat pour le moment.</p>`;
-
-  els.resultPhotoGallery.querySelectorAll("[data-delete-result]").forEach((button) => {
-    button.addEventListener("click", () => deleteResultPhoto(button.dataset.deleteResult));
-  });
-}
-
-function renderResultPhoto(photo) {
-  return `
-    <article class="ticket-card">
-      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Résultat du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>
-      <div>
-        <strong>${dateLabel(photo.date)}</strong>
-        <small>${escapeHtml(photo.note || "Résultat du dernier tirage")}</small>
-      </div>
-      ${adminUnlocked ? `<button class="danger-button compact-button" type="button" data-delete-result="${escapeHtml(photo.id)}">Supprimer</button>` : ""}
-    </article>
-  `;
-}
-
-function renderTickets() {
-  const photos = state.ticketPhotos || [];
-  const latestDate = photos[0]?.date;
-  els.ticketPhotoCount.textContent = photos.length === 1 ? "1 photo" : `${photos.length} photos`;
-  els.ticketSummary.textContent = photos.length
-    ? `${photos.length} photo${photos.length > 1 ? "s" : ""} ajoutée${photos.length > 1 ? "s" : ""}${latestDate ? ` pour le tirage du ${dateLabel(latestDate)}` : ""}.`
-    : "Aucune photo ajoutée pour le moment.";
-  els.openTickets.disabled = photos.length === 0;
-  els.ticketGallery.innerHTML = photos.length
-    ? photos.map(renderTicketPhoto).join("")
-    : `<p class="empty-state">Aucune photo de billet pour le moment.</p>`;
-
-  els.ticketGallery.querySelectorAll("[data-delete-ticket]").forEach((button) => {
-    button.addEventListener("click", () => deleteTicketPhoto(button.dataset.deleteTicket));
-  });
-}
-
-function renderTicketPhoto(photo) {
-  return `
-    <article class="ticket-card">
-      <a href="${escapeHtml(photo.imageDataUrl)}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.imageDataUrl)}" alt="Billet du ${dateLabel(photo.date)}" loading="lazy" />
-      </a>
-      <div>
-        <strong>${dateLabel(photo.date)}</strong>
-        <small>${escapeHtml(photo.note || "Photo de billet")}</small>
-      </div>
-      ${adminUnlocked ? `<button class="danger-button compact-button" type="button" data-delete-ticket="${escapeHtml(photo.id)}">Supprimer</button>` : ""}
-    </article>
-  `;
-}
-
 function renderHistoryRow(entry) {
   return `
     <div class="history-row">
@@ -955,7 +844,8 @@ async function addTransaction(event) {
     async () => {
       try {
         const amount = parseMoneyInput(els.amountInput.value);
-        if (!Number.isFinite(amount) || amount === 0) {
+        const txType = els.transactionType.value;
+        if (!Number.isFinite(amount) || (amount === 0 && txType !== "set_balance")) {
           throw new Error("Montant invalide.");
         }
         const previousWins = Number(state?.groupWins || 0);
@@ -985,8 +875,8 @@ async function addTransaction(event) {
           const newWins = Number(state.groupWins || 0);
           const delta = newWins - previousWins;
           showToast(
-            `Gain de ${money(body.amount)} enregistré. Nos gains: ${money(previousWins)} → ${money(newWins)}` +
-              (delta === 0 ? " (aucun changement — vérifie le serveur)" : ` (+${money(delta)})`)
+            `Gain de ${money(body.amount)} enregistr?. Nos gains: ${money(previousWins)} ? ${money(newWins)}` +
+              (delta === 0 ? " (aucun changement ? v?rifie le serveur)" : ` (+${money(delta)})`)
           );
         } else {
           showToast("Transaction enregistree.");
@@ -1058,7 +948,7 @@ async function addParticipant(event) {
     els.newParticipantBalance.value = "0";
     els.newParticipantActive.checked = true;
     render();
-    showToast("Participant ajouté. Le coût du prochain tirage est recalculé.");
+    showToast("Participant ajout?. Le co?t du prochain tirage est recalcul?.");
   } catch (error) {
     if (String(error.message).includes("PIN")) {
       sessionStorage.removeItem(ADMIN_PIN_KEY);
@@ -1148,14 +1038,14 @@ async function submitDrawResult({ replacePrevious, button }) {
     const delta = newWins - previousWins;
     if (amount > 0) {
       showToast(
-        `${replacePrevious ? "Résultat corrigé" : "Gain ajouté"}: ${money(amount)}. ` +
-          `Nos gains: ${money(previousWins)} → ${money(newWins)}` +
+        `${replacePrevious ? "R?sultat corrig?" : "Gain ajout?"}: ${money(amount)}. ` +
+          `Nos gains: ${money(previousWins)} ? ${money(newWins)}` +
           (delta === 0 ? " (aucun changement net)" : ` (${delta > 0 ? "+" : ""}${money(delta)})`) +
           `. Prochain: ${state.nextDraw?.coveredByGains ? "couvert" : money(state.nextDraw?.missingAmount) + " manquant"}.`,
         7000
       );
     } else {
-      showToast(`Résultat corrigé. Nos gains: ${money(newWins)}.`);
+      showToast(`R?sultat corrig?. Nos gains: ${money(newWins)}.`);
     }
   }).catch((error) => {
     if (String(error.message).includes("PIN")) {
@@ -1175,150 +1065,6 @@ async function updateDrawResult(event) {
 async function replaceDrawResult() {
   const button = document.querySelector("#replaceResultGain");
   return submitDrawResult({ replacePrevious: true, button });
-}
-
-async function uploadResultPhotos(event) {
-  event.preventDefault();
-  const files = Array.from(els.resultPhotoInput.files || []);
-  if (files.length === 0) {
-    showToast("Choisis au moins une photo.");
-    return;
-  }
-
-  return withButtonBusy(event.submitter || els.resultPhotoForm.querySelector("button[type='submit']"), "Publication...", async () => {
-    for (const file of files) {
-      const imageDataUrl = await compressImage(file);
-      state = await api("/api/admin/result-photos", {
-        method: "POST",
-        body: JSON.stringify({
-          date: els.resultPhotoDateInput.value || null,
-          imageDataUrl,
-          note: els.resultPhotoNoteInput.value.trim(),
-          adminPin: getAdminPin()
-        }),
-        timeoutMs: 60000
-      });
-    }
-
-    els.resultPhotoInput.value = "";
-    els.resultPhotoNoteInput.value = "";
-    resultPhotosHydrated = true;
-    writeCachedState(state);
-    render();
-    showToast(files.length === 1 ? "Photo de résultat publiée." : "Photos de résultat publiées.");
-  }).catch((error) => {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message, 6000);
-  });
-}
-
-async function uploadTicketPhotos(event) {
-  event.preventDefault();
-  const files = Array.from(els.ticketPhotoInput.files || []);
-  if (files.length === 0) {
-    showToast("Choisis au moins une photo.");
-    return;
-  }
-
-  return withButtonBusy(event.submitter || els.ticketPhotoForm.querySelector("button[type='submit']"), "Publication...", async () => {
-    for (const file of files) {
-      const imageDataUrl = await compressImage(file);
-      state = await api("/api/admin/ticket-photos", {
-        method: "POST",
-        body: JSON.stringify({
-          date: els.ticketDateInput.value || null,
-          imageDataUrl,
-          note: els.ticketNoteInput.value.trim(),
-          adminPin: getAdminPin()
-        }),
-        timeoutMs: 60000
-      });
-    }
-
-    els.ticketPhotoInput.value = "";
-    els.ticketNoteInput.value = "";
-    ticketPhotosHydrated = true;
-    writeCachedState(state);
-    render();
-    showToast(files.length === 1 ? "Photo de billet publiee." : "Photos de billets publiees.");
-  }).catch((error) => {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message, 6000);
-  });
-}
-
-async function deleteTicketPhoto(id) {
-  if (!id) return;
-  const confirmed = window.confirm("Supprimer cette photo de billet?");
-  if (!confirmed) return;
-
-  try {
-    state = await api("/api/admin/ticket-photos/delete", {
-      method: "POST",
-      body: JSON.stringify({ id, adminPin: getAdminPin() }),
-      timeoutMs: 30000
-    });
-    render();
-    showToast("Photo supprimee.");
-  } catch (error) {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message, 6000);
-  }
-}
-
-async function deleteResultPhoto(id) {
-  if (!id) return;
-  const confirmed = window.confirm("Supprimer cette photo de résultat?");
-  if (!confirmed) return;
-
-  try {
-    state = await api("/api/admin/result-photos/delete", {
-      method: "POST",
-      body: JSON.stringify({ id, adminPin: getAdminPin() }),
-      timeoutMs: 30000
-    });
-    render();
-    showToast("Photo supprimée.");
-  } catch (error) {
-    if (String(error.message).includes("PIN")) {
-      sessionStorage.removeItem(ADMIN_PIN_KEY);
-    }
-    showToast(error.message, 6000);
-  }
-}
-
-function compressImage(file) {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      reject(new Error("Le fichier choisi n'est pas une image."));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Impossible de lire l'image."));
-    reader.onload = () => {
-      const image = new Image();
-      image.onerror = () => reject(new Error("Impossible de preparer l'image."));
-      image.onload = () => {
-        const maxSize = 1600;
-        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        const context = canvas.getContext("2d");
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.78));
-      };
-      image.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 async function setParticipantActive() {
@@ -1397,18 +1143,71 @@ function showToast(message, duration = 3000) {
 }
 
 function setToday() {
-  if (!els.dateInput) return;
   const today = new Date();
   const offset = today.getTimezoneOffset() * 60000;
-  els.dateInput.value = new Date(today.getTime() - offset).toISOString().slice(0, 10);
+  const iso = new Date(today.getTime() - offset).toISOString().slice(0, 10);
+  if (els.dateInput) els.dateInput.value = iso;
+  if (els.setBalanceDate) els.setBalanceDate.value = iso;
 }
 
+async function applyExactBalance(event) {
+  event.preventDefault();
+  const participantId = els.setBalanceParticipant?.value;
+  const amount = parseMoneyInput(els.setBalanceAmount?.value);
+  if (!participantId) {
+    showToast("Choisis un participant.");
+    return;
+  }
+  if (!Number.isFinite(amount)) {
+    showToast("Entre le nouveau solde (0 est permis).");
+    return;
+  }
+  const person = (state.participants || []).find((p) => p.id === participantId);
+  const current = Number(person?.balance || 0);
+  if (amount === current) {
+    showToast("Le solde est déjà à ce montant.");
+    return;
+  }
+  const ok = window.confirm(
+    `${person?.name || "Participant"}\nSolde actuel: ${money(current)}\nNouveau solde: ${money(amount)}\n\nAppliquer cette correction ?`
+  );
+  if (!ok) return;
+
+  return withButtonConfirmation(
+    event.submitter || els.setBalanceForm.querySelector("button[type='submit']"),
+    "Correction...",
+    "Corrigé",
+    async () => {
+      state = await api("/api/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "set_balance",
+          participantId,
+          amount,
+          date: els.setBalanceDate?.value || new Date().toISOString().slice(0, 10),
+          paymentMode: "Correction",
+          note: (els.setBalanceNote?.value || "").trim(),
+          adminPin: getAdminPin()
+        })
+      });
+      selectedId = participantId;
+      localStorage.setItem(SELECTED_MEMBER_KEY, selectedId);
+      if (els.setBalanceAmount) els.setBalanceAmount.value = "";
+      if (els.setBalanceNote) els.setBalanceNote.value = "";
+      render();
+      showToast(`${person?.name}: ${money(current)} → ${money(amount)}`);
+    }
+  ).catch((error) => {
+    showToast(error.message || "Correction impossible.");
+  });
+}
+
+on(els.setBalanceForm, "submit", applyExactBalance);
+on(els.setBalanceParticipant, "change", renderSelectors);
 on(els.form, "submit", addTransaction);
 on(els.drawInfoForm, "submit", updateDrawInfo);
 on(els.drawResultForm, "submit", updateDrawResult);
 on(document.querySelector("#replaceResultGain"), "click", replaceDrawResult);
-on(els.resultPhotoForm, "submit", uploadResultPhotos);
-on(els.ticketPhotoForm, "submit", uploadTicketPhotos);
 on(els.participantForm, "submit", addParticipant);
 on(els.applyDraw, "click", applyDraw);
 on(els.clearHistory, "click", clearHistory);
@@ -1419,33 +1218,6 @@ on(els.refreshCombinedTotal, "click", () =>
   withButtonBusy(els.refreshCombinedTotal, "Calcul...", refreshCombinedAdminTotal));
 on(els.transactionType, "change", renderSelectors);
 on(els.resetDemo, "click", () => withButtonBusy(els.resetDemo, "Chargement...", () => loadState()));
-on(els.openResultPhotos, "click", async () => {
-  els.resultPhotosModal?.classList.remove("hidden");
-  if (els.resultPhotoGallery) {
-    els.resultPhotoGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
-  }
-  await ensureResultPhotos();
-});
-on(els.closeResultPhotos, "click", () => els.resultPhotosModal?.classList.add("hidden"));
-on(els.resultPhotosModal, "click", (event) => {
-  if (event.target === els.resultPhotosModal) {
-    els.resultPhotosModal.classList.add("hidden");
-  }
-});
-on(els.openTickets, "click", async () => {
-  els.ticketsModal?.classList.remove("hidden");
-  if (els.ticketGallery) {
-    els.ticketGallery.innerHTML = `<p class="empty-state">Chargement des photos…</p>`;
-  }
-  await ensureTicketPhotos();
-});
-on(els.closeTickets, "click", () => els.ticketsModal?.classList.add("hidden"));
-on(els.ticketsModal, "click", (event) => {
-  if (event.target === els.ticketsModal) {
-    els.ticketsModal.classList.add("hidden");
-  }
-});
-
 if (els.resetDemo) els.resetDemo.textContent = "Rafraichir";
 if (els.adminNote) els.adminNote.textContent = "";
 

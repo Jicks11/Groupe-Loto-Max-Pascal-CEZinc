@@ -1,5 +1,5 @@
 ﻿/* Service worker — installation ecran d accueil 6/49 */
-const CACHE = "loto-649-shell-v2";
+const CACHE = "loto-649-shell-v3";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

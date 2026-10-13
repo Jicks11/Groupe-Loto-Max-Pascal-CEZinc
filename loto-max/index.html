@@ -33,7 +33,7 @@
           linear-gradient(180deg, #061226 0%, #081d37 55%, #04101f 100%) !important;
       }
     </style>
-    <link rel="stylesheet" href="styles.css?v=20260825-supabase" />
+    <link rel="stylesheet" href="styles.css?v=20260918-solde" />
     <script>
       window.LOTO_SUPABASE_ANON_KEY = "sb_publishable_bVxnr-7GaSLPLWuGDrlnPQ_X7jQ8F_M";
     </script>
@@ -111,8 +111,8 @@
           </article>
           <article>
             <span>R&eacute;sultat du dernier tirage</span>
-            <button class="accent-button compact-button metric-action" id="openResultPhotos" type="button">Voir r&eacute;sultat du dernier tirage</button>
-            <small id="resultPhotoSummary">Aucune photo ajout&eacute;e pour le moment.</small>
+            <strong id="lastResultAmount">$0</strong>
+            <small id="lastResultMeta">Aucun r&eacute;sultat enregistr&eacute;</small>
           </article>
           <article>
             <span>Soldes des participants</span>
@@ -124,18 +124,6 @@
             <strong id="groupTotal">$0</strong>
             <small>Participants + nos gains</small>
           </article>
-        </section>
-
-        <section class="panel tickets-panel" aria-labelledby="ticketsTitle">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Nos billets / num&eacute;ros</p>
-              <h2 id="ticketsTitle">Photos des billets</h2>
-            </div>
-            <span class="pill" id="ticketPhotoCount">0 photo</span>
-          </div>
-          <p id="ticketSummary">Aucune photo ajout&eacute;e pour le moment.</p>
-          <button class="accent-button compact-button" id="openTickets" type="button">Voir les billets</button>
         </section>
 
         <section class="content-grid">
@@ -197,6 +185,35 @@
                   <small id="combinedTotalStatus">Visible seulement en mode admin.</small>
                 </div>
               </section>
+
+              <div class="admin-divider" aria-hidden="true"></div>
+
+              <form class="admin-form" id="setBalanceForm">
+                <h3>Corriger le solde d'un participant</h3>
+                <p class="admin-hint">Choisis la personne, entre le <strong>nouveau solde exact</strong> (ex. 18), puis applique. L'app calcule la différence toute seule.</p>
+                <label>
+                  Participant
+                  <select id="setBalanceParticipant"></select>
+                </label>
+                <p class="admin-hint">Solde actuel : <strong id="setBalanceCurrent">—</strong></p>
+                <div class="form-row">
+                  <label>
+                    Nouveau solde exact ($)
+                    <input id="setBalanceAmount" type="number" step="0.01" placeholder="ex. 18" required />
+                  </label>
+                  <label>
+                    Date
+                    <input id="setBalanceDate" type="date" required />
+                  </label>
+                </div>
+                <label>
+                  Note
+                  <input id="setBalanceNote" type="text" maxlength="80" placeholder="Optionnel — ex. erreur tirage" />
+                </label>
+                <div class="button-row">
+                  <button class="primary-button" type="submit">Appliquer ce solde</button>
+                </div>
+              </form>
 
               <div class="admin-divider" aria-hidden="true"></div>
 
@@ -308,52 +325,6 @@
 
               <div class="admin-divider" aria-hidden="true"></div>
 
-              <form class="admin-form participant-admin-form" id="resultPhotoForm">
-                <h3>Ajouter une photo du r&eacute;sultat</h3>
-
-                <label>
-                  Date du tirage
-                  <input id="resultPhotoDateInput" type="date" />
-                </label>
-
-                <label>
-                  Photo / screenshot
-                  <input id="resultPhotoInput" type="file" accept="image/*" multiple />
-                </label>
-
-                <label>
-                  Note
-                  <input id="resultPhotoNoteInput" type="text" maxlength="100" placeholder="Ex: Capture du r&eacute;sultat Loto-Qu&eacute;bec" />
-                </label>
-
-                <button class="accent-button" type="submit">Publier le r&eacute;sultat</button>
-              </form>
-
-              <div class="admin-divider" aria-hidden="true"></div>
-
-              <form class="admin-form participant-admin-form" id="ticketPhotoForm">
-                <h3>Ajouter une photo de billet</h3>
-
-                <label>
-                  Date du tirage
-                  <input id="ticketDateInput" type="date" />
-                </label>
-
-                <label>
-                  Photo / screenshot
-                  <input id="ticketPhotoInput" type="file" accept="image/*" multiple />
-                </label>
-
-                <label>
-                  Note
-                  <input id="ticketNoteInput" type="text" maxlength="100" placeholder="Ex: Billets achet&eacute;s chez Couche-Tard" />
-                </label>
-
-                <button class="accent-button" type="submit">Publier les billets</button>
-              </form>
-
-              <div class="admin-divider" aria-hidden="true"></div>
-
               <form class="admin-form participant-admin-form" id="participantForm">
                 <h3>Ajouter un participant</h3>
 
@@ -424,36 +395,10 @@
       </main>
     </div>
 
-    <div class="modal-overlay hidden" id="ticketsModal" role="dialog" aria-modal="true" aria-labelledby="ticketsModalTitle">
-      <div class="modal-card">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Nos billets / num&eacute;ros</p>
-            <h2 id="ticketsModalTitle">Photos des billets</h2>
-          </div>
-          <button class="ghost-button modal-close" id="closeTickets" type="button">Fermer</button>
-        </div>
-        <div class="ticket-gallery" id="ticketGallery"></div>
-      </div>
-    </div>
-
-    <div class="modal-overlay hidden" id="resultPhotosModal" role="dialog" aria-modal="true" aria-labelledby="resultPhotosModalTitle">
-      <div class="modal-card">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">R&eacute;sultat officiel</p>
-            <h2 id="resultPhotosModalTitle">R&eacute;sultat du dernier tirage</h2>
-          </div>
-          <button class="ghost-button modal-close" id="closeResultPhotos" type="button">Fermer</button>
-        </div>
-        <div class="ticket-gallery" id="resultPhotoGallery"></div>
-      </div>
-    </div>
-
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="loto-engine.js?v=20260825-supabase"></script>
-    <script src="app.js?v=20260825-supabase" defer></script>
+    <script src="loto-engine.js?v=20261013-nophotos"></script>
+    <script src="app.js?v=20261013-nophotos" defer></script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", function () {

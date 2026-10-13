@@ -917,144 +917,22 @@ public sealed class LotoStore
 
     public LotoView AddTicketPhoto(TicketPhotoRequest request)
     {
-        lock (_gate)
-        {
-            var state = Load(useCache: false);
-            var expectedLastUpdatedAt = state.LastUpdatedAt;
-            ValidateAdmin(state, request.AdminPin);
-
-            var imageDataUrl = (request.ImageDataUrl ?? "").Trim();
-            if (!imageDataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new LotoException("Choisis une image valide.");
-            }
-
-            if (imageDataUrl.Length > 1_400_000)
-            {
-                throw new LotoException("L'image est trop lourde. Recadre ou compresse la capture et reessaie.");
-            }
-
-            var drawDate = request.Date ?? PrizeDrawDate(state);
-            var note = CleanDrawInfoText(request.Note, 100);
-            var now = LotoClock.Now;
-            var photos = (state.TicketPhotos ?? new List<TicketPhoto>())
-                .OrderByDescending(photo => photo.CreatedAt)
-                .Take(29)
-                .ToList();
-
-            photos.Insert(0, new TicketPhoto(
-                Guid.NewGuid().ToString("N"),
-                drawDate,
-                imageDataUrl,
-                note,
-                now));
-
-            state = state with
-            {
-                TicketPhotos = photos,
-                LastUpdatedAt = now
-            };
-            Save(state, expectedLastUpdatedAt);
-            return BuildView(state);
-        }
+        throw new LotoException("Les photos sont retirees.");
     }
 
     public LotoView AddResultPhoto(TicketPhotoRequest request)
     {
-        lock (_gate)
-        {
-            var state = Load(useCache: false);
-            var expectedLastUpdatedAt = state.LastUpdatedAt;
-            ValidateAdmin(state, request.AdminPin);
-
-            var imageDataUrl = (request.ImageDataUrl ?? "").Trim();
-            if (!imageDataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new LotoException("Choisis une image valide.");
-            }
-
-            if (imageDataUrl.Length > 1_400_000)
-            {
-                throw new LotoException("L'image est trop lourde. Recadre ou compresse la capture et reessaie.");
-            }
-
-            var drawDate = request.Date ?? LastCompletedPublicDrawDate(state, LotoClock.Now);
-            var note = CleanDrawInfoText(request.Note, 100);
-            var now = LotoClock.Now;
-            var photos = (state.ResultPhotos ?? new List<TicketPhoto>())
-                .OrderByDescending(photo => photo.CreatedAt)
-                .Take(29)
-                .ToList();
-
-            photos.Insert(0, new TicketPhoto(
-                Guid.NewGuid().ToString("N"),
-                drawDate,
-                imageDataUrl,
-                note,
-                now));
-
-            state = state with
-            {
-                ResultPhotos = photos,
-                LastUpdatedAt = now
-            };
-            Save(state, expectedLastUpdatedAt);
-            return BuildView(state);
-        }
+        throw new LotoException("Les photos sont retirees.");
     }
 
     public LotoView DeleteTicketPhoto(TicketPhotoDeleteRequest request)
     {
-        lock (_gate)
-        {
-            var state = Load(useCache: false);
-            var expectedLastUpdatedAt = state.LastUpdatedAt;
-            ValidateAdmin(state, request.AdminPin);
-
-            var id = (request.Id ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                throw new LotoException("Photo introuvable.");
-            }
-
-            var photos = state.TicketPhotos ?? new List<TicketPhoto>();
-            var removed = photos.RemoveAll(photo => photo.Id == id);
-            if (removed == 0)
-            {
-                throw new LotoException("Photo introuvable.");
-            }
-
-            state = state with { TicketPhotos = photos, LastUpdatedAt = LotoClock.Now };
-            Save(state, expectedLastUpdatedAt);
-            return BuildView(state);
-        }
+        throw new LotoException("Les photos sont retirees.");
     }
 
     public LotoView DeleteResultPhoto(TicketPhotoDeleteRequest request)
     {
-        lock (_gate)
-        {
-            var state = Load(useCache: false);
-            var expectedLastUpdatedAt = state.LastUpdatedAt;
-            ValidateAdmin(state, request.AdminPin);
-
-            var id = (request.Id ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                throw new LotoException("Photo introuvable.");
-            }
-
-            var photos = state.ResultPhotos ?? new List<TicketPhoto>();
-            var removed = photos.RemoveAll(photo => photo.Id == id);
-            if (removed == 0)
-            {
-                throw new LotoException("Photo introuvable.");
-            }
-
-            state = state with { ResultPhotos = photos, LastUpdatedAt = LotoClock.Now };
-            Save(state, expectedLastUpdatedAt);
-            return BuildView(state);
-        }
+        throw new LotoException("Les photos sont retirees.");
     }
 
     public void CheckAdmin(AdminRequest request)
@@ -2216,40 +2094,6 @@ public sealed class LotoDatabase
             });
         }
 
-        foreach (var photo in (state.TicketPhotos ?? new List<TicketPhoto>())
-            .OrderByDescending(photo => photo.CreatedAt)
-            .Take(30))
-        {
-            ExecuteNonQuery(connection, transaction, """
-                INSERT INTO loto_ticket_photos (id, draw_date, image_data_url, note, created_at)
-                VALUES (@id, @draw_date, @image_data_url, @note, @created_at);
-                """, parameters =>
-            {
-                parameters.AddWithValue("id", photo.Id);
-                parameters.AddWithValue("draw_date", ToDateTime(photo.Date));
-                parameters.AddWithValue("image_data_url", photo.ImageDataUrl);
-                parameters.AddWithValue("note", photo.Note);
-                parameters.AddWithValue("created_at", photo.CreatedAt.ToUniversalTime());
-            });
-        }
-
-        foreach (var photo in (state.ResultPhotos ?? new List<TicketPhoto>())
-            .OrderByDescending(photo => photo.CreatedAt)
-            .Take(30))
-        {
-            ExecuteNonQuery(connection, transaction, """
-                INSERT INTO loto_result_photos (id, draw_date, image_data_url, note, created_at)
-                VALUES (@id, @draw_date, @image_data_url, @note, @created_at);
-                """, parameters =>
-            {
-                parameters.AddWithValue("id", photo.Id);
-                parameters.AddWithValue("draw_date", ToDateTime(photo.Date));
-                parameters.AddWithValue("image_data_url", photo.ImageDataUrl);
-                parameters.AddWithValue("note", photo.Note);
-                parameters.AddWithValue("created_at", photo.CreatedAt.ToUniversalTime());
-            });
-        }
-
         transaction.Commit();
     }
 
@@ -2609,7 +2453,7 @@ public sealed class LotoDatabase
         }
 
         using (var command = new NpgsqlCommand(Sql("""
-            SELECT id, draw_date, image_data_url, note, created_at
+            SELECT id, draw_date, ''::text AS image_data_url, note, created_at
             FROM loto_ticket_photos
             ORDER BY draw_date DESC, created_at DESC
             LIMIT 30;
@@ -2628,7 +2472,7 @@ public sealed class LotoDatabase
         }
 
         using (var command = new NpgsqlCommand(Sql("""
-            SELECT id, draw_date, image_data_url, note, created_at
+            SELECT id, draw_date, ''::text AS image_data_url, note, created_at
             FROM loto_result_photos
             ORDER BY draw_date DESC, created_at DESC
             LIMIT 30;

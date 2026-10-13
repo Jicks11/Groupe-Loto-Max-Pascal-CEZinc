@@ -15,6 +15,13 @@
     };
   }
 
+  function withoutPhotos(state) {
+    const next = JSON.parse(JSON.stringify(state || {}));
+    next.ticketPhotos = [];
+    next.resultPhotos = [];
+    return next;
+  }
+
   async function rpc(name, body) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
       method: "POST",
@@ -217,24 +224,6 @@
     const winsRemainder = drawTotal > 0 ? coverageGroupWins % drawTotal : 0;
     const nextDate = nextDueDate(state, today);
     const missing = Math.max(0, drawTotal - coverageGroupWins);
-    const mapPhoto = (p) => ({
-      id: p.id,
-      date: p.date,
-      imageDataUrl: includePhotoBytes ? p.imageDataUrl || "" : "",
-      note: p.note || "",
-      createdAt: p.createdAt
-    });
-    const ticketPhotos = (state.ticketPhotos || [])
-      .slice()
-      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-      .slice(0, 30)
-      .map(mapPhoto);
-    const resultPhotos = (state.resultPhotos || [])
-      .slice()
-      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-      .slice(0, 30)
-      .map(mapPhoto);
-
     const nonOpening = (state.transactions || []).filter((t) => t.type !== "opening");
     const groupLevel = nonOpening
       .filter((t) => !t.participantId || t.type === "gain" || t.type === "group_draw_payment")
@@ -293,8 +282,8 @@
         note: state.lastDrawResult?.note || "",
         updatedAt: state.lastDrawResult?.updatedAt
       },
-      ticketPhotos,
-      resultPhotos,
+      ticketPhotos: [],
+      resultPhotos: [],
       groupHistory
     };
   }
@@ -402,8 +391,8 @@
     payload.transactions = payload.transactions || [];
     payload.participants = payload.participants || [];
     payload.appliedDraws = payload.appliedDraws || [];
-    payload.ticketPhotos = payload.ticketPhotos || [];
-    payload.resultPhotos = payload.resultPhotos || [];
+    payload.ticketPhotos = [];
+    payload.resultPhotos = [];
     payload.settings = payload.settings || {};
     cache[groupId] = payload;
     return payload;
@@ -411,19 +400,20 @@
 
   async function saveRaw(groupId, state, pin) {
     state.lastUpdatedAt = nowOffset();
+    const slim = withoutPhotos(state);
     const saved = await rpc("save_loto_app_state", {
       p_id: groupId,
       p_pin: pin || pinOf(state),
-      p_payload: state
+      p_payload: slim
     });
-    cache[groupId] = saved || state;
+    cache[groupId] = withoutPhotos(saved || slim);
     return cache[groupId];
   }
 
   async function mutate(groupId, pin, fn) {
     const state = JSON.parse(JSON.stringify(await loadRaw(groupId)));
     requireAdmin(state, pin);
-    fn(state);
+    await fn(state);
     await saveRaw(groupId, state, pin);
     return buildView(state, true);
   }
@@ -455,24 +445,7 @@
 
     if (p === "/ping") return { ok: true, at: nowOffset() };
     if (p === "/state" && method === "GET") return view(groupId, false);
-    if (p === "/ticket-photos") {
-      const state = await loadRaw(groupId);
-      return {
-        photos: (state.ticketPhotos || [])
-          .slice()
-          .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-          .slice(0, 30)
-      };
-    }
-    if (p === "/result-photos") {
-      const state = await loadRaw(groupId);
-      return {
-        photos: (state.resultPhotos || [])
-          .slice()
-          .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-          .slice(0, 30)
-      };
-    }
+    if (p === "/ticket-photos" || p === "/result-photos") return { photos: [] };
     if (p === "/admin/check") {
       const state = await loadRaw(groupId);
       requireAdmin(state, body.adminPin);
@@ -481,8 +454,9 @@
     if (p === "/transactions") {
       return mutate(groupId, body.adminPin, (state) => {
         const amount = Number(body.amount);
-        if (!amount) throw new Error("Le montant ne peut pas etre 0$.");
         const type = String(body.type || "").trim().toLowerCase();
+        if (!Number.isFinite(amount)) throw new Error("Montant invalide.");
+        if (type !== "set_balance" && !amount) throw new Error("Le montant ne peut pas etre 0$.");
         const date = body.date || todayIso();
         if (type === "gain") {
           state.transactions.unshift(newTx(date, "gain", null, Math.abs(amount), "Gain ajoute", body.paymentMode, body.note));
@@ -491,7 +465,7 @@
           const current = participantBalance(state, pax.id);
           const diff = amount - current;
           if (!diff) throw new Error("Le solde est deja a ce montant.");
-          state.transactions.unshift(newTx(date, "correction", pax.id, diff, "Ajustement solde", body.paymentMode, body.note));
+          state.transactions.unshift(newTx(date, "correction", pax.id, diff, "Ajustement solde", body.paymentMode || "Correction", body.note));
         } else {
           const pax = findParticipant(state, body.participantId);
           const transactionAmount = type === "correction" ? amount : type === "withdrawal" ? -Math.abs(amount) : Math.abs(amount);
@@ -632,29 +606,8 @@
         };
       });
     }
-    if (p === "/admin/ticket-photos" || p === "/admin/result-photos") {
-      return mutate(groupId, body.adminPin, (state) => {
-        const imageDataUrl = String(body.imageDataUrl || "").trim();
-        if (!imageDataUrl.startsWith("data:image/")) throw new Error("Choisis une image valide.");
-        if (imageDataUrl.length > 1400000) throw new Error("L'image est trop lourde. Recadre ou compresse la capture et reessaie.");
-        const key = p.includes("ticket") ? "ticketPhotos" : "resultPhotos";
-        const date = body.date || (key === "ticketPhotos" ? publicDrawDate(state) : lastCompletedPublicDrawDate(state));
-        const photos = (state[key] || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 29);
-        photos.unshift({
-          id: uid(),
-          date,
-          imageDataUrl,
-          note: cleanText(body.note, 100),
-          createdAt: nowOffset()
-        });
-        state[key] = photos;
-      });
-    }
-    if (p === "/admin/ticket-photos/delete" || p === "/admin/result-photos/delete") {
-      return mutate(groupId, body.adminPin, (state) => {
-        const key = p.includes("ticket") ? "ticketPhotos" : "resultPhotos";
-        state[key] = (state[key] || []).filter((x) => x.id !== body.id);
-      });
+    if (p === "/admin/ticket-photos" || p === "/admin/result-photos" || p === "/admin/ticket-photos/delete" || p === "/admin/result-photos/delete") {
+      throw new Error("Les photos sont retirees.");
     }
 
     throw new Error(`Route inconnue: ${p}`);
